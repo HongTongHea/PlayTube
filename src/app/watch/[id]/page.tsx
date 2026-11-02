@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   Headphones,
+  Loader2,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import {
@@ -35,6 +36,8 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
   const [video, setVideo] = useState<VideoItem | null>(null);
   const [relatedVideos, setRelatedVideos] = useState<VideoItem[]>([]);
+  const [relatedPageToken, setRelatedPageToken] = useState<string | undefined>(undefined);
+  const [loadingMoreRelated, setLoadingMoreRelated] = useState<boolean>(false);
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [theaterMode, setTheaterMode] = useState<boolean>(false);
   const [descExpanded, setDescExpanded] = useState<boolean>(false);
@@ -67,6 +70,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         });
         if (!cancelled) {
           setRelatedVideos(relatedRes.videos.filter((v) => v.id !== videoId));
+          setRelatedPageToken(relatedRes.nextPageToken);
         }
       }
       setComments(commentsRes.comments);
@@ -77,6 +81,35 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       cancelled = true;
     };
   }, [videoId, apiKey]);
+
+  const handleLoadMoreRelated = async () => {
+    if (loadingMoreRelated || !video) return;
+    setLoadingMoreRelated(true);
+    try {
+      const queryTopic = video.title
+        .split(" ")
+        .slice(0, 3)
+        .join(" ");
+      const res = await fetchPopularVideos({
+        apiKey,
+        query: relatedPageToken ? queryTopic : undefined,
+        maxResults: 10,
+        pageToken: relatedPageToken,
+      });
+
+      if (res.videos.length > 0) {
+        setRelatedVideos((prev) => {
+          const existingIds = new Set(prev.map((v) => v.id));
+          existingIds.add(videoId);
+          const uniqueNew = res.videos.filter((v) => !existingIds.has(v.id));
+          return [...prev, ...uniqueNew];
+        });
+        setRelatedPageToken(res.nextPageToken);
+      }
+    } finally {
+      setLoadingMoreRelated(false);
+    }
+  };
 
   const saved = video ? isVideoSaved(video.id) : false;
 
@@ -333,6 +366,26 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               />
             ))}
           </div>
+
+          {relatedVideos.length > 0 && (
+            <div className="pt-2 px-2">
+              <button
+                type="button"
+                onClick={handleLoadMoreRelated}
+                disabled={loadingMoreRelated}
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-zinc-200/80 dark:bg-zinc-800/90 hover:bg-red-600 hover:text-white dark:hover:bg-red-600 text-zinc-700 dark:text-zinc-200 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
+              >
+                {loadingMoreRelated ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Loading more videos...</span>
+                  </>
+                ) : (
+                  <span>Load More Videos</span>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

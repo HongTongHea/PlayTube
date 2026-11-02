@@ -160,7 +160,7 @@ export default function Navbar() {
         <Link
           href="/"
           onClick={handleLogoClick}
-          className="flex items-center gap-2 group focus:outline-none"
+          className="hidden md:flex items-center gap-2 group focus:outline-none"
         >
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-red-600 to-rose-600 flex items-center justify-center shadow-sm shadow-red-500/20 group-hover:scale-105 transition-transform">
             <Play className="w-4 h-4 text-white fill-white ml-0.5" />
