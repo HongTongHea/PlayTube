@@ -122,28 +122,8 @@ export default function Navbar() {
         </div>
       </form>
 
-      {/* Right: API Key Button + Theme Toggle */}
+      {/* Right: Theme Toggle */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={() => setIsApiModalOpen(true)}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-medium border transition-all ${
-            hasValidKeyConfigured
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
-              : "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
-          }`}
-          title="Configure YouTube Data API v3 Key"
-        >
-          <KeyRound className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">
-            {hasValidKeyConfigured ? "API Key Active" : "Set YouTube API Key"}
-          </span>
-          <span
-            className={`w-2 h-2 rounded-full ${
-              hasValidKeyConfigured ? "bg-emerald-500" : "bg-amber-500 animate-pulse"
-            }`}
-          />
-        </button>
-
         <button
           onClick={toggleDarkMode}
           className="p-2.5 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors"

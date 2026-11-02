@@ -169,28 +169,6 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
-
-      {/* Bottom Ad-Free Status Card */}
-      <div className="mt-6 p-3.5 rounded-2xl bg-zinc-100/80 dark:bg-zinc-900/90 border border-zinc-200/70 dark:border-zinc-800/80 space-y-2.5">
-        <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
-          <ShieldCheck className="w-4 h-4 shrink-0" />
-          <span>Ad-Free Player Active</span>
-        </div>
-        <p className="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-          Videos stream via privacy-enhanced{" "}
-          <code className="text-[10px] px-1 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800">
-            youtube-nocookie
-          </code>{" "}
-          with zero commercial interruptions.
-        </p>
-        <button
-          onClick={() => setIsApiModalOpen(true)}
-          className="w-full py-1.5 px-3 rounded-lg text-xs font-medium bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 border border-zinc-200/80 dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors"
-        >
-          <KeyRound className="w-3.5 h-3.5 text-red-500" />
-          {hasValidKeyConfigured ? "Manage API Key" : "Add YouTube API Key"}
-        </button>
-      </div>
     </aside>
   );
 }
