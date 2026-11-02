@@ -12,6 +12,7 @@ import {
   Search,
   Loader2,
   Headphones,
+  X,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { CATEGORIES } from "@/lib/mockData";
@@ -38,6 +39,10 @@ export default function HomePage() {
     setActiveCategory,
     searchQuery,
     setSearchQuery,
+    searchHistory,
+    addSearchHistory,
+    removeSearchHistoryItem,
+    clearSearchHistory,
     savedVideos,
     watchHistory,
     clearHistory,
@@ -236,7 +241,7 @@ export default function HomePage() {
                 YouTube Video Link Detected ({directVideoId})
               </p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Open this video directly in the ad-free player.
+                Open this video directly in the player.
               </p>
             </div>
           </div>
@@ -244,8 +249,56 @@ export default function HomePage() {
             onClick={() => router.push(`/watch/${directVideoId}`)}
             className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
           >
-            Watch Ad-Free Now
+            Watch Now
           </button>
+        </div>
+      )}
+
+      {/* Search History Section when inside History tab */}
+      {activeSection === "history" && searchHistory.length > 0 && (
+        <div className="p-4 rounded-2xl bg-white/70 dark:bg-zinc-900/60 border border-zinc-200/70 dark:border-zinc-800/80 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-red-500" />
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-white">
+                Search History ({searchHistory.length})
+              </h2>
+            </div>
+            <button
+              onClick={clearSearchHistory}
+              className="inline-flex items-center gap-1 text-xs font-medium text-red-500 hover:underline"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear Search History
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {searchHistory.map((term) => (
+              <div
+                key={term}
+                className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-200/80 dark:border-zinc-700/80"
+              >
+                <button
+                  onClick={() => {
+                    setSearchQuery(term);
+                    addSearchHistory(term);
+                    setActiveSection("home");
+                  }}
+                  className="hover:text-red-500 transition-colors"
+                >
+                  {term}
+                </button>
+                <button
+                  onClick={() => removeSearchHistoryItem(term)}
+                  className="p-0.5 rounded-full text-zinc-400 hover:text-red-500 transition-colors"
+                  title="Remove search term"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -288,7 +341,7 @@ export default function HomePage() {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              Clear History
+              Clear Watch History
             </button>
           )}
 

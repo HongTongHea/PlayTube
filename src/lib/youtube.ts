@@ -81,11 +81,11 @@ function mapYouTubeVideoItem(item: any): VideoItem {
   const thumbnails = snippet.thumbnails || {};
 
   const thumb =
-    thumbnails.maxres?.url ||
-    thumbnails.standard?.url ||
     thumbnails.high?.url ||
+    thumbnails.standard?.url ||
+    thumbnails.maxres?.url ||
     thumbnails.medium?.url ||
-    `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : "");
 
   return {
     id: videoId,

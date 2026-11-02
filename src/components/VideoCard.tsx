@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Bookmark, Check, Play, Headphones, Tv } from "lucide-react";
 import { VideoItem } from "@/types/youtube";
@@ -20,6 +20,27 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
   const durationBadge = formatDuration(video.duration);
   const channelInitial = (video.channelTitle || "P")[0].toUpperCase();
 
+  const resolvedRealThumb =
+    video.thumbnailUrl && video.thumbnailUrl.trim() !== ""
+      ? video.thumbnailUrl
+      : `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
+
+  const [thumbSrc, setThumbSrc] = useState<string>(resolvedRealThumb);
+
+  useEffect(() => {
+    setThumbSrc(resolvedRealThumb);
+  }, [resolvedRealThumb]);
+
+  const handleThumbError = () => {
+    const hqFallback = `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
+    const mqFallback = `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`;
+    if (thumbSrc !== hqFallback) {
+      setThumbSrc(hqFallback);
+    } else if (thumbSrc !== mqFallback) {
+      setThumbSrc(mqFallback);
+    }
+  };
+
   if (compact) {
     return (
       <div
@@ -32,8 +53,10 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
         <div className="relative w-36 sm:w-40 aspect-video rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-800 shrink-0">
           <Link href={`/watch/${video.id}`} className="block w-full h-full">
             <img
-              src={video.thumbnailUrl}
+              src={thumbSrc}
               alt={video.title}
+              referrerPolicy="no-referrer"
+              onError={handleThumbError}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               loading="lazy"
             />
@@ -56,7 +79,7 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
               playTrack(video, "music", playlist);
             }}
             title="Stream in background player"
-            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+            className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
           >
             <span className="w-9 h-9 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg">
               <Play className="w-4 h-4 fill-white ml-0.5" />
@@ -104,16 +127,17 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
           : "bg-white/70 dark:bg-zinc-900/50 hover:bg-white dark:hover:bg-zinc-900/95 border-zinc-200/70 dark:border-zinc-800/70 hover:border-zinc-300 dark:hover:border-zinc-700/80 hover:shadow-xl hover:-translate-y-0.5"
       }`}
     >
-      {/* Thumbnail Container */}
+      {/* Real Thumbnail Container (Bright & Unobstructed) */}
       <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-800 shadow-xs">
         <Link href={`/watch/${video.id}`} className="block w-full h-full">
           <img
-            src={video.thumbnailUrl}
+            src={thumbSrc}
             alt={video.title}
+            referrerPolicy="no-referrer"
+            onError={handleThumbError}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
             loading="lazy"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
         </Link>
 
         {/* Now Playing Equalizer Badge */}
@@ -134,7 +158,7 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
             className={`absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide pointer-events-none ${
               durationBadge === "LIVE"
                 ? "bg-red-600 text-white"
-                : "bg-black/75 text-white backdrop-blur-xs"
+                : "bg-black/80 text-white"
             }`}
           >
             {durationBadge}

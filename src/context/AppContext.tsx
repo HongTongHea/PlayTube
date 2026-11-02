@@ -24,6 +24,12 @@ interface AppContextType {
   setActiveCategory: (catId: string) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  // Search History
+  searchHistory: string[];
+  addSearchHistory: (query: string) => void;
+  removeSearchHistoryItem: (query: string) => void;
+  clearSearchHistory: () => void;
+  // Saved & Watch History
   savedVideos: VideoItem[];
   toggleSaveVideo: (video: VideoItem) => void;
   isVideoSaved: (videoId: string) => boolean;
@@ -49,6 +55,7 @@ const STORAGE_KEYS = {
   API_KEY: "puretube_yt_api_key",
   SAVED: "puretube_saved_videos",
   HISTORY: "puretube_watch_history",
+  SEARCH_HISTORY: "playtube_search_history",
   THEME: "puretube_theme",
 };
 
@@ -60,6 +67,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeSection, setActiveSection] = useState<NavSection>("home");
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [savedVideos, setSavedVideos] = useState<VideoItem[]>([]);
   const [watchHistory, setWatchHistory] = useState<VideoItem[]>([]);
   const [darkMode, setDarkMode] = useState<boolean>(true);
@@ -85,6 +93,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const storedHistory = localStorage.getItem(STORAGE_KEYS.HISTORY);
       if (storedHistory) setWatchHistory(JSON.parse(storedHistory));
 
+      const storedSearchHistory = localStorage.getItem(STORAGE_KEYS.SEARCH_HISTORY);
+      if (storedSearchHistory) setSearchHistory(JSON.parse(storedSearchHistory));
+
       const storedTheme = localStorage.getItem(STORAGE_KEYS.THEME);
       if (storedTheme === "light") {
         setDarkMode(false);
@@ -107,6 +118,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else {
         localStorage.removeItem(STORAGE_KEYS.API_KEY);
       }
+    } catch {}
+  };
+
+  const addSearchHistory = (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    setSearchHistory((prev) => {
+      const filtered = prev.filter(
+        (item) => item.toLowerCase() !== trimmed.toLowerCase()
+      );
+      const next = [trimmed, ...filtered].slice(0, 20);
+      try {
+        localStorage.setItem(STORAGE_KEYS.SEARCH_HISTORY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const removeSearchHistoryItem = (query: string) => {
+    setSearchHistory((prev) => {
+      const next = prev.filter((item) => item !== query);
+      try {
+        localStorage.setItem(STORAGE_KEYS.SEARCH_HISTORY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const clearSearchHistory = () => {
+    setSearchHistory([]);
+    try {
+      localStorage.removeItem(STORAGE_KEYS.SEARCH_HISTORY);
     } catch {}
   };
 
@@ -211,6 +254,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setActiveCategory,
         searchQuery,
         setSearchQuery,
+        searchHistory,
+        addSearchHistory,
+        removeSearchHistoryItem,
+        clearSearchHistory,
         savedVideos,
         toggleSaveVideo,
         isVideoSaved,
