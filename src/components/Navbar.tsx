@@ -79,7 +79,7 @@ export default function Navbar() {
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-lg tracking-tight text-zinc-900 dark:text-white">
-              Pure<span className="text-red-500">Tube</span>
+              Play<span className="text-red-500">Tube</span>
             </span>
             <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
               <ShieldCheck className="w-3 h-3" />

@@ -1,4 +1,4 @@
-# PureTube — Clean, Ad-Free YouTube Web App (Next.js)
+# PlayTube — Clean, Ad-Free YouTube Web App (Next.js)
 
 A minimalist, distraction-free, ad-free video streaming web application built with **Next.js (App Router)**, **TypeScript**, **Tailwind CSS**, and the **YouTube Data API v3**.
 

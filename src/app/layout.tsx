@@ -6,7 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import ApiKeyModal from "@/components/ApiKeyModal";
 
 export const metadata: Metadata = {
-  title: "PureTube — Clean, Ad-Free YouTube Web App",
+  title: "PlayTube — Clean, Ad-Free YouTube Web App",
   description:
     "Minimalist, distraction-free, ad-free video streaming experience powered by Next.js and YouTube Data API v3.",
 };
