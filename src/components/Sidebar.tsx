@@ -21,9 +21,6 @@ import { CATEGORIES } from "@/lib/mockData";
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   all: <Home className="w-4 h-4" />,
-  khmer: <Music2 className="w-4 h-4 text-red-500" />,
-  english_music: <Music2 className="w-4 h-4 text-rose-500" />,
-  funny: <Flame className="w-4 h-4 text-amber-500" />,
   coding: <Code2 className="w-4 h-4" />,
   music: <Music2 className="w-4 h-4" />,
   gaming: <Gamepad2 className="w-4 h-4" />,

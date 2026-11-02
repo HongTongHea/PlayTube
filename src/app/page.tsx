@@ -13,15 +13,10 @@ import {
   Loader2,
   Headphones,
   X,
-  Shuffle,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { CATEGORIES } from "@/lib/mockData";
-import {
-  fetchPopularVideos,
-  fetchRandomHomeMix,
-  searchYouTubeVideos,
-} from "@/lib/youtube";
+import { fetchPopularVideos, searchYouTubeVideos } from "@/lib/youtube";
 import { VideoItem } from "@/types/youtube";
 import VideoCard from "@/components/VideoCard";
 
@@ -58,7 +53,6 @@ export default function HomePage() {
   const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
-  const [mixRefreshSeed, setMixRefreshSeed] = useState<number>(0);
 
   const observerTarget = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
@@ -91,13 +85,6 @@ export default function HomePage() {
             setVideos(res.videos);
             setNextPageToken(res.nextPageToken);
           }
-        } else if (activeCategory === "all") {
-          // Random All Mix: Khmer music + English music + Funny videos
-          const res = await fetchRandomHomeMix({ apiKey });
-          if (!cancelled) {
-            setVideos(res.videos);
-            setNextPageToken(res.nextPageToken);
-          }
         } else {
           const selectedCat = CATEGORIES.find((c) => c.id === activeCategory);
           const res = await fetchPopularVideos({
@@ -122,7 +109,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [apiKey, activeSection, activeCategory, searchQuery, mixRefreshSeed]);
+  }, [apiKey, activeSection, activeCategory, searchQuery]);
 
   // Load more videos when scrolling down (Infinite Scroll)
   const loadMoreVideos = useCallback(async () => {
@@ -145,11 +132,6 @@ export default function HomePage() {
         res = await fetchPopularVideos({
           apiKey,
           maxResults: 12,
-          pageToken: nextPageToken,
-        });
-      } else if (activeCategory === "all") {
-        res = await fetchRandomHomeMix({
-          apiKey,
           pageToken: nextPageToken,
         });
       } else {
@@ -235,27 +217,15 @@ export default function HomePage() {
             })}
           </div>
 
-          <div className="hidden sm:flex items-center gap-2 shrink-0">
-            {activeCategory === "all" && (
-              <button
-                onClick={() => setMixRefreshSeed((s) => s + 1)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-200/80 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-red-600 hover:text-white transition-colors"
-                title="Shuffle a new random mix of Khmer, English & Funny videos"
-              >
-                <Shuffle className="w-3.5 h-3.5" />
-                Shuffle Mix
-              </button>
-            )}
-            {displayedVideos.length > 0 && (
-              <button
-                onClick={() => playTrack(displayedVideos[0], "music", displayedVideos)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 transition-opacity"
-              >
-                <Headphones className="w-3.5 h-3.5 text-red-500" />
-                Stream All
-              </button>
-            )}
-          </div>
+          {displayedVideos.length > 0 && (
+            <button
+              onClick={() => playTrack(displayedVideos[0], "music", displayedVideos)}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 shrink-0 transition-opacity"
+            >
+              <Headphones className="w-3.5 h-3.5 text-red-500" />
+              Stream All
+            </button>
+          )}
         </div>
       )}
 

@@ -1,14 +1,13 @@
 import { VideoItem, CommentItem, CategoryOption } from "@/types/youtube";
 
 export const CATEGORIES: CategoryOption[] = [
-  { id: "all", label: "All Mix" },
-  { id: "khmer", label: "Khmer Music", query: "khmer song official mv cambodia music" },
-  { id: "english_music", label: "English Music", query: "english pop music hits official video" },
-  { id: "funny", label: "Funny & Comedy", query: "funny comedy videos viral laugh khmer english" },
-  { id: "music", label: "Chill & Lofi", categoryId: "10", query: "lofi chill beats music" },
-  { id: "gaming", label: "Gaming", categoryId: "20", query: "gaming highlights" },
+  { id: "all", label: "All" },
   { id: "coding", label: "Coding & Tech", query: "nextjs web development programming tutorial" },
+  { id: "music", label: "Music", categoryId: "10", query: "lofi chill beats music" },
+  { id: "gaming", label: "Gaming", categoryId: "20", query: "gaming highlights" },
+  { id: "science", label: "Science & AI", categoryId: "28", query: "artificial intelligence science explained" },
   { id: "movies", label: "Cinema", categoryId: "1", query: "short film 4k" },
+  { id: "news", label: "Tech News", categoryId: "25", query: "technology news" },
   { id: "sports", label: "Sports", categoryId: "17", query: "sports highlights" },
 ];
 
