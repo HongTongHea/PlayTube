@@ -163,6 +163,98 @@ export async function verifyYouTubeApiKey(apiKey: string): Promise<{ valid: bool
   }
 }
 
+const HOME_MIX_QUERIES = [
+  "khmer song official mv cambodia music",
+  "english pop music hits official video",
+  "funny comedy videos khmer english laugh",
+  "khmer new song acoustic remix",
+  "vanda khmer hip hop official mv",
+  "best english songs playlist official",
+  "khmer funny comedy viral video",
+  "top english music hits",
+  "cambodia music original song",
+  "funny moments viral laugh video",
+];
+
+function shuffleVideos(list: VideoItem[]): VideoItem[] {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+export async function fetchRandomHomeMix(options: {
+  apiKey?: string;
+  pageToken?: string;
+}): Promise<{ videos: VideoItem[]; nextPageToken?: string; isDemo: boolean; error?: string }> {
+  const key = getResolvedApiKey(options.apiKey);
+  if (!key) {
+    return {
+      videos: shuffleVideos(DEMO_VIDEOS),
+      nextPageToken: undefined,
+      isDemo: true,
+    };
+  }
+
+  try {
+    const pageNum = options.pageToken?.startsWith("mix_")
+      ? parseInt(options.pageToken.replace("mix_", ""), 10) || 1
+      : 0;
+
+    // Pick 3 diverse queries (Khmer, English, Funny) rotated by pageNum + random offset
+    const offset = (pageNum * 3 + Math.floor(Math.random() * 2)) % HOME_MIX_QUERIES.length;
+    const selectedQueries = [
+      HOME_MIX_QUERIES[offset % HOME_MIX_QUERIES.length],
+      HOME_MIX_QUERIES[(offset + 1) % HOME_MIX_QUERIES.length],
+      HOME_MIX_QUERIES[(offset + 2) % HOME_MIX_QUERIES.length],
+    ];
+
+    const results = await Promise.allSettled(
+      selectedQueries.map((q) => searchYouTubeVideos(q, key, 6))
+    );
+
+    const combined: VideoItem[] = [];
+    const seen = new Set<string>();
+
+    for (const res of results) {
+      if (res.status === "fulfilled" && res.value.videos) {
+        for (const v of res.value.videos) {
+          if (v.id && !seen.has(v.id)) {
+            seen.add(v.id);
+            combined.push(v);
+          }
+        }
+      }
+    }
+
+    if (combined.length > 0) {
+      const nextMixPage = pageNum < 8 ? `mix_${pageNum + 1}` : undefined;
+      return {
+        videos: shuffleVideos(combined),
+        nextPageToken: nextMixPage,
+        isDemo: false,
+      };
+    }
+
+    // Fallback to popular videos shuffled
+    const pop = await fetchPopularVideos({ apiKey: key, maxResults: 16 });
+    return {
+      videos: shuffleVideos(pop.videos),
+      nextPageToken: pop.nextPageToken,
+      isDemo: pop.isDemo,
+    };
+  } catch (err: any) {
+    return {
+      videos: shuffleVideos(DEMO_VIDEOS),
+      nextPageToken: undefined,
+      isDemo: true,
+      error: err?.message,
+    };
+  }
+}
+
 export async function fetchPopularVideos(options: {
   apiKey?: string;
   categoryId?: string;
