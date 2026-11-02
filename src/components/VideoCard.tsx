@@ -26,10 +26,15 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
       : `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
 
   const [thumbSrc, setThumbSrc] = useState<string>(resolvedRealThumb);
+  const [avatarError, setAvatarError] = useState<boolean>(false);
 
   useEffect(() => {
     setThumbSrc(resolvedRealThumb);
   }, [resolvedRealThumb]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [video.channelAvatar]);
 
   const handleThumbError = () => {
     const hqFallback = `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
@@ -95,9 +100,25 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
             >
               {video.title}
             </Link>
-            <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-              {video.channelTitle}
-            </p>
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded-full overflow-hidden bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-[9px] flex items-center justify-center shrink-0">
+                {video.channelAvatar && !avatarError ? (
+                  <img
+                    src={video.channelAvatar}
+                    alt={video.channelTitle}
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarError(true)}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  channelInitial
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                {video.channelTitle}
+              </p>
+            </div>
           </div>
           <div className="flex items-center justify-between gap-2 mt-1">
             <div className="text-[11px] text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 truncate">
@@ -196,11 +217,22 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
         </button>
       </div>
 
-      {/* Track / Video Metadata + Stream Actions */}
+      {/* Track / Video Metadata + Real Channel Avatar + Stream Actions */}
       <div className="flex flex-col justify-between flex-1 pt-3 px-0.5 gap-2.5">
         <div className="flex gap-2.5">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
-            {channelInitial}
+          <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-xs ring-1 ring-zinc-200/60 dark:ring-zinc-800">
+            {video.channelAvatar && !avatarError ? (
+              <img
+                src={video.channelAvatar}
+                alt={video.channelTitle}
+                referrerPolicy="no-referrer"
+                onError={() => setAvatarError(true)}
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              channelInitial
+            )}
           </div>
 
           <div className="flex-1 min-w-0">

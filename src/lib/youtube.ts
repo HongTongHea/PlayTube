@@ -3,6 +3,51 @@ import { DEMO_VIDEOS, DEMO_COMMENTS } from "@/lib/mockData";
 
 const YT_BASE_URL = "https://www.googleapis.com/youtube/v3";
 const DEFAULT_YOUTUBE_API_KEY = "AIzaSyCKDFWdLvKs-6Z8XBnCIIFnGySXWtwmA7E";
+const channelAvatarCache = new Map<string, string>();
+
+async function enrichVideosWithChannelAvatars(
+  videos: VideoItem[],
+  apiKey: string
+): Promise<VideoItem[]> {
+  if (!apiKey || videos.length === 0) return videos;
+
+  const missingChannelIds = Array.from(
+    new Set(
+      videos
+        .map((v) => v.channelId)
+        .filter((id) => Boolean(id) && !channelAvatarCache.has(id))
+    )
+  );
+
+  if (missingChannelIds.length > 0) {
+    try {
+      const params = new URLSearchParams({
+        part: "snippet",
+        id: missingChannelIds.slice(0, 50).join(","),
+        key: apiKey,
+      });
+      const res = await fetch(`${YT_BASE_URL}/channels?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        for (const ch of data.items || []) {
+          const thumbs = ch.snippet?.thumbnails || {};
+          const avatarUrl =
+            thumbs.medium?.url || thumbs.default?.url || thumbs.high?.url || "";
+          if (ch.id && avatarUrl) {
+            channelAvatarCache.set(ch.id, avatarUrl);
+          }
+        }
+      }
+    } catch {
+      // Ignore channel avatar fetch errors
+    }
+  }
+
+  return videos.map((v) => ({
+    ...v,
+    channelAvatar: channelAvatarCache.get(v.channelId) || v.channelAvatar,
+  }));
+}
 
 export function getResolvedApiKey(customKey?: string): string {
   if (customKey && customKey.trim().length > 10) {
@@ -164,7 +209,8 @@ export async function fetchPopularVideos(options: {
     }
 
     const data = await res.json();
-    const videos: VideoItem[] = (data.items || []).map(mapYouTubeVideoItem);
+    const rawVideos: VideoItem[] = (data.items || []).map(mapYouTubeVideoItem);
+    const videos = await enrichVideosWithChannelAvatars(rawVideos, key);
     return {
       videos,
       nextPageToken: data.nextPageToken,
@@ -237,15 +283,19 @@ export async function searchYouTubeVideos(
     const detailsRes = await fetch(`${YT_BASE_URL}/videos?${detailsParams.toString()}`);
     if (detailsRes.ok) {
       const detailsData = await detailsRes.json();
+      const rawVideos = (detailsData.items || []).map(mapYouTubeVideoItem);
+      const enriched = await enrichVideosWithChannelAvatars(rawVideos, key);
       return {
-        videos: (detailsData.items || []).map(mapYouTubeVideoItem),
+        videos: enriched,
         nextPageToken: nextToken,
         isDemo: false,
       };
     }
 
+    const fallbackMapped = items.map(mapYouTubeVideoItem);
+    const enrichedFallback = await enrichVideosWithChannelAvatars(fallbackMapped, key);
     return {
-      videos: items.map(mapYouTubeVideoItem),
+      videos: enrichedFallback,
       nextPageToken: nextToken,
       isDemo: false,
     };
@@ -293,7 +343,9 @@ export async function fetchVideoDetails(
     if (!res.ok) throw new Error("Failed to fetch video details");
     const data = await res.json();
     if (data.items && data.items.length > 0) {
-      return { video: mapYouTubeVideoItem(data.items[0]), isDemo: false };
+      const mapped = mapYouTubeVideoItem(data.items[0]);
+      const [enriched] = await enrichVideosWithChannelAvatars([mapped], key);
+      return { video: enriched, isDemo: false };
     }
   } catch {
     // Fallback below

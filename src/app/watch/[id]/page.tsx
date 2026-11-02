@@ -171,10 +171,19 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               </h1>
 
               <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-200/80 dark:border-zinc-800/80">
-                {/* Channel Info */}
+                {/* Channel Info with Real Channel Avatar */}
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-sm flex items-center justify-center shrink-0">
-                    {(video.channelTitle || "P")[0].toUpperCase()}
+                  <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-sm flex items-center justify-center shrink-0 ring-1 ring-zinc-200 dark:ring-zinc-800">
+                    {video.channelAvatar ? (
+                      <img
+                        src={video.channelAvatar}
+                        alt={video.channelTitle}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      (video.channelTitle || "P")[0].toUpperCase()
+                    )}
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-zinc-900 dark:text-white">
