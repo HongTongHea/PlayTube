@@ -123,13 +123,15 @@ export async function fetchPopularVideos(options: {
   categoryId?: string;
   query?: string;
   maxResults?: number;
-}): Promise<{ videos: VideoItem[]; isDemo: boolean; error?: string }> {
+  pageToken?: string;
+}): Promise<{ videos: VideoItem[]; nextPageToken?: string; isDemo: boolean; error?: string }> {
   const key = getResolvedApiKey(options.apiKey);
   const maxResults = options.maxResults || 16;
 
   if (!key) {
     return {
       videos: filterDemoVideos(options.categoryId, options.query),
+      nextPageToken: "demo_page_2",
       isDemo: true,
     };
   }
@@ -137,7 +139,7 @@ export async function fetchPopularVideos(options: {
   try {
     // If a search query is provided (either search bar or topic query), use search endpoint + enrich with stats/duration
     if (options.query && options.query.trim()) {
-      return await searchYouTubeVideos(options.query.trim(), key, maxResults);
+      return await searchYouTubeVideos(options.query.trim(), key, maxResults, options.pageToken);
     }
 
     const params = new URLSearchParams({
@@ -151,6 +153,9 @@ export async function fetchPopularVideos(options: {
     if (options.categoryId && options.categoryId !== "all") {
       params.set("videoCategoryId", options.categoryId);
     }
+    if (options.pageToken && !options.pageToken.startsWith("demo_")) {
+      params.set("pageToken", options.pageToken);
+    }
 
     const res = await fetch(`${YT_BASE_URL}/videos?${params.toString()}`);
     if (!res.ok) {
@@ -160,10 +165,15 @@ export async function fetchPopularVideos(options: {
 
     const data = await res.json();
     const videos: VideoItem[] = (data.items || []).map(mapYouTubeVideoItem);
-    return { videos, isDemo: false };
+    return {
+      videos,
+      nextPageToken: data.nextPageToken,
+      isDemo: false,
+    };
   } catch (err: any) {
     return {
       videos: filterDemoVideos(options.categoryId, options.query),
+      nextPageToken: undefined,
       isDemo: true,
       error: err?.message || "Failed to load from YouTube API; showing curated videos.",
     };
@@ -173,12 +183,14 @@ export async function fetchPopularVideos(options: {
 export async function searchYouTubeVideos(
   query: string,
   apiKey?: string,
-  maxResults = 16
-): Promise<{ videos: VideoItem[]; isDemo: boolean; error?: string }> {
+  maxResults = 16,
+  pageToken?: string
+): Promise<{ videos: VideoItem[]; nextPageToken?: string; isDemo: boolean; error?: string }> {
   const key = getResolvedApiKey(apiKey);
   if (!key) {
     return {
       videos: filterDemoVideos(undefined, query),
+      nextPageToken: undefined,
       isDemo: true,
     };
   }
@@ -193,6 +205,10 @@ export async function searchYouTubeVideos(
       key,
     });
 
+    if (pageToken && !pageToken.startsWith("demo_")) {
+      searchParams.set("pageToken", pageToken);
+    }
+
     const searchRes = await fetch(`${YT_BASE_URL}/search?${searchParams.toString()}`);
     if (!searchRes.ok) {
       const errJson = await searchRes.json().catch(() => ({}));
@@ -201,13 +217,14 @@ export async function searchYouTubeVideos(
 
     const searchData = await searchRes.json();
     const items = searchData.items || [];
+    const nextToken = searchData.nextPageToken;
     const videoIds = items
       .map((item: any) => item.id?.videoId)
       .filter(Boolean)
       .join(",");
 
     if (!videoIds) {
-      return { videos: [], isDemo: false };
+      return { videos: [], nextPageToken: undefined, isDemo: false };
     }
 
     // Fetch statistics and contentDetails (duration, views, likes) in a single batch request
@@ -222,17 +239,20 @@ export async function searchYouTubeVideos(
       const detailsData = await detailsRes.json();
       return {
         videos: (detailsData.items || []).map(mapYouTubeVideoItem),
+        nextPageToken: nextToken,
         isDemo: false,
       };
     }
 
     return {
       videos: items.map(mapYouTubeVideoItem),
+      nextPageToken: nextToken,
       isDemo: false,
     };
   } catch (err: any) {
     return {
       videos: filterDemoVideos(undefined, query),
+      nextPageToken: undefined,
       isDemo: true,
       error: err?.message || "Search fallback activated",
     };

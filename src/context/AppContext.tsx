@@ -3,8 +3,10 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { VideoItem } from "@/types/youtube";
 import { getResolvedApiKey } from "@/lib/youtube";
+import { DEMO_VIDEOS } from "@/lib/mockData";
 
 export type NavSection = "home" | "trending" | "saved" | "history";
+export type StreamMode = "video" | "music";
 
 interface AppContextType {
   apiKey: string;
@@ -14,6 +16,8 @@ interface AppContextType {
   setIsApiModalOpen: (open: boolean) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  mobileMenuOpen: boolean;
+  setMobileMenuOpen: (open: boolean) => void;
   activeSection: NavSection;
   setActiveSection: (section: NavSection) => void;
   activeCategory: string;
@@ -28,6 +32,15 @@ interface AppContextType {
   clearHistory: () => void;
   darkMode: boolean;
   toggleDarkMode: () => void;
+  // Music & Video Stream Player State
+  currentTrack: VideoItem | null;
+  streamMode: StreamMode;
+  setStreamMode: (mode: StreamMode) => void;
+  queue: VideoItem[];
+  playTrack: (video: VideoItem, mode?: StreamMode, list?: VideoItem[]) => void;
+  playNext: () => void;
+  playPrevious: () => void;
+  closePlayer: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -43,12 +56,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [apiKey, setApiKeyState] = useState<string>(() => getResolvedApiKey());
   const [isApiModalOpen, setIsApiModalOpen] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [activeSection, setActiveSection] = useState<NavSection>("home");
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [savedVideos, setSavedVideos] = useState<VideoItem[]>([]);
   const [watchHistory, setWatchHistory] = useState<VideoItem[]>([]);
   const [darkMode, setDarkMode] = useState<boolean>(true);
+
+  // Persistent Stream Player
+  const [currentTrack, setCurrentTrack] = useState<VideoItem | null>(null);
+  const [streamMode, setStreamMode] = useState<StreamMode>("music");
+  const [queue, setQueue] = useState<VideoItem[]>(DEMO_VIDEOS);
 
   useEffect(() => {
     try {
@@ -75,7 +94,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         document.documentElement.classList.add("dark");
       }
     } catch {
-      // Ignore storage errors in private browsing
+      // Ignore storage errors
     }
   }, []);
 
@@ -137,6 +156,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const playTrack = (video: VideoItem, mode: StreamMode = "music", list?: VideoItem[]) => {
+    setCurrentTrack(video);
+    setStreamMode(mode);
+    if (list && list.length > 0) {
+      setQueue(list);
+    }
+    addToHistory(video);
+  };
+
+  const playNext = () => {
+    if (!currentTrack || queue.length === 0) return;
+    const idx = queue.findIndex((v) => v.id === currentTrack.id);
+    const nextIdx = idx >= 0 && idx + 1 < queue.length ? idx + 1 : 0;
+    const nextVideo = queue[nextIdx];
+    if (nextVideo) {
+      setCurrentTrack(nextVideo);
+      addToHistory(nextVideo);
+    }
+  };
+
+  const playPrevious = () => {
+    if (!currentTrack || queue.length === 0) return;
+    const idx = queue.findIndex((v) => v.id === currentTrack.id);
+    const prevIdx = idx > 0 ? idx - 1 : queue.length - 1;
+    const prevVideo = queue[prevIdx];
+    if (prevVideo) {
+      setCurrentTrack(prevVideo);
+      addToHistory(prevVideo);
+    }
+  };
+
+  const closePlayer = () => {
+    setCurrentTrack(null);
+  };
+
   const hasValidKeyConfigured = Boolean(getResolvedApiKey(apiKey));
 
   return (
@@ -149,6 +203,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setIsApiModalOpen,
         sidebarOpen,
         setSidebarOpen,
+        mobileMenuOpen,
+        setMobileMenuOpen,
         activeSection,
         setActiveSection,
         activeCategory,
@@ -163,6 +219,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         clearHistory,
         darkMode,
         toggleDarkMode,
+        currentTrack,
+        streamMode,
+        setStreamMode,
+        queue,
+        playTrack,
+        playNext,
+        playPrevious,
+        closePlayer,
       }}
     >
       {children}

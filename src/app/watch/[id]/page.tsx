@@ -2,18 +2,19 @@
 
 import React, { useEffect, useState, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ThumbsUp,
   Bookmark,
   Check,
   Share2,
-  ShieldCheck,
   Maximize2,
   Minimize2,
   MessageSquare,
   ArrowLeft,
   ChevronDown,
   ChevronUp,
+  Headphones,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import {
@@ -29,7 +30,8 @@ import VideoCard from "@/components/VideoCard";
 
 export default function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: videoId } = use(params);
-  const { apiKey, toggleSaveVideo, isVideoSaved, addToHistory } = useApp();
+  const { apiKey, toggleSaveVideo, isVideoSaved, addToHistory, playTrack } = useApp();
+  const router = useRouter();
 
   const [video, setVideo] = useState<VideoItem | null>(null);
   const [relatedVideos, setRelatedVideos] = useState<VideoItem[]>([]);
@@ -53,7 +55,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         setVideo(detailsRes.video);
         addToHistory(detailsRes.video);
 
-        // Fetch related videos based on video title or category
+        // Fetch related videos based on video title
         const queryTopic = detailsRes.video.title
           .split(" ")
           .slice(0, 3)
@@ -61,7 +63,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         const relatedRes = await fetchPopularVideos({
           apiKey,
           query: queryTopic,
-          maxResults: 10,
+          maxResults: 12,
         });
         if (!cancelled) {
           setRelatedVideos(relatedRes.videos.filter((v) => v.id !== videoId));
@@ -86,15 +88,21 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     }
   };
 
-  // Ad-free privacy-enhanced embed URL
+  const handleContinueInMusicBar = () => {
+    if (!video) return;
+    playTrack(video, "music", [video, ...relatedVideos]);
+    router.push("/");
+  };
+
+  // Ad-free privacy-enhanced embed URL with playsinline=1 for smooth mobile & desktop playback
   const embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
     videoId
-  )}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3`;
+  )}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`;
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-5">
-      {/* Top Breadcrumb */}
-      <div className="flex items-center justify-between mb-4">
+    <div className="max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
+      {/* Top Breadcrumb & Controls */}
+      <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
         <Link
           href="/"
           className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
@@ -104,13 +112,20 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         </Link>
 
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Ad-Free Privacy Player
-          </span>
+          {video && (
+            <button
+              onClick={handleContinueInMusicBar}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-600 hover:bg-red-500 text-white shadow-xs transition-colors"
+              title="Minimize into the persistent Music Stream bar and keep browsing"
+            >
+              <Headphones className="w-3.5 h-3.5" />
+              <span>Background Music Mode</span>
+            </button>
+          )}
+
           <button
             onClick={() => setTheaterMode(!theaterMode)}
-            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
+            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
             title="Toggle Theater Mode"
           >
             {theaterMode ? (
@@ -129,10 +144,10 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       <div
         className={`grid grid-cols-1 ${
           theaterMode ? "lg:grid-cols-1" : "lg:grid-cols-3"
-        } gap-7`}
+        } gap-6 sm:gap-7`}
       >
         {/* Left / Main Column: Video Player + Info + Comments */}
-        <div className={theaterMode ? "w-full" : "lg:col-span-2 space-y-5"}>
+        <div className={theaterMode ? "w-full" : "lg:col-span-2 space-y-4 sm:space-y-5"}>
           {/* Ad-Free Video Player */}
           <div
             className={`relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-xl ring-1 ring-zinc-200 dark:ring-zinc-800 ${
@@ -141,7 +156,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           >
             <iframe
               src={embedUrl}
-              title={video?.title || "YouTube Video Player"}
+              title={video?.title || "PlayTube Video Player"}
               className="w-full h-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
@@ -150,39 +165,39 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
           {/* Video Title & Actions */}
           {video && (
-            <div className="space-y-4 pt-2">
-              <h1 className="text-lg sm:text-xl font-bold text-zinc-900 dark:text-white leading-snug">
+            <div className="space-y-4 pt-1">
+              <h1 className="text-base sm:text-xl font-bold text-zinc-900 dark:text-white leading-snug">
                 {video.title}
               </h1>
 
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-zinc-200/80 dark:border-zinc-800/80">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-200/80 dark:border-zinc-800/80">
                 {/* Channel Info */}
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-sm flex items-center justify-center">
-                    {(video.channelTitle || "Y")[0].toUpperCase()}
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-sm flex items-center justify-center shrink-0">
+                    {(video.channelTitle || "P")[0].toUpperCase()}
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-zinc-900 dark:text-white">
                       {video.channelTitle}
                     </p>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                      Verified Creator
+                      Verified Artist / Creator
                     </p>
                   </div>
                 </div>
 
                 {/* Action Pills */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {video.likeCount && (
-                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800/90 text-zinc-800 dark:text-zinc-200">
-                      <ThumbsUp className="w-4 h-4 text-red-500" />
+                    <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800/90 text-zinc-800 dark:text-zinc-200">
+                      <ThumbsUp className="w-3.5 h-3.5 text-red-500" />
                       <span>{formatCompactNumber(video.likeCount)}</span>
                     </div>
                   )}
 
                   <button
                     onClick={() => toggleSaveVideo(video)}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold transition-colors ${
+                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold transition-colors ${
                       saved
                         ? "bg-red-600 text-white"
                         : "bg-zinc-100 dark:bg-zinc-800/90 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
@@ -190,21 +205,21 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
                   >
                     {saved ? (
                       <>
-                        <Check className="w-4 h-4" /> Saved
+                        <Check className="w-3.5 h-3.5" /> Saved
                       </>
                     ) : (
                       <>
-                        <Bookmark className="w-4 h-4" /> Watch Later
+                        <Bookmark className="w-3.5 h-3.5" /> Save
                       </>
                     )}
                   </button>
 
                   <button
                     onClick={handleShare}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800/90 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800/90 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                   >
-                    <Share2 className="w-4 h-4" />
-                    <span>{copied ? "Link Copied!" : "Share"}</span>
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>{copied ? "Copied!" : "Share"}</span>
                   </button>
                 </div>
               </div>
@@ -242,7 +257,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               </div>
 
               {/* Comments Section */}
-              <div className="pt-4 space-y-4">
+              <div className="pt-2 space-y-4">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="w-4 h-4 text-red-500" />
                   <h2 className="text-sm font-bold text-zinc-900 dark:text-white">
@@ -250,7 +265,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
                   </h2>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {comments.map((comment) => (
                     <div
                       key={comment.id}
@@ -297,11 +312,16 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         {/* Right Column: Up Next / Related Videos */}
         <div className="space-y-3">
           <h2 className="text-sm font-bold text-zinc-900 dark:text-white px-2">
-            Up Next
+            Up Next in Queue
           </h2>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {relatedVideos.map((relVideo) => (
-              <VideoCard key={relVideo.id} video={relVideo} compact />
+              <VideoCard
+                key={relVideo.id}
+                video={relVideo}
+                compact
+                playlist={relatedVideos}
+              />
             ))}
           </div>
         </div>
