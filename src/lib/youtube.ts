@@ -62,6 +62,9 @@ export function getResolvedApiKey(customKey?: string): string {
 
 export function formatViewCount(views?: string | number): string {
   if (!views) return "— views";
+  if (typeof views === "string" && /[a-zA-Z]/.test(views)) {
+    return views.toLowerCase().includes("view") ? views : `${views} views`;
+  }
   const num = typeof views === "string" ? parseInt(views, 10) : views;
   if (isNaN(num)) return "— views";
   if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B views`;
@@ -82,6 +85,9 @@ export function formatCompactNumber(val?: string | number): string {
 export function formatDuration(isoDuration?: string): string {
   if (!isoDuration) return "";
   if (isoDuration === "PT0S" || isoDuration === "P0D") return "LIVE";
+  if (/^\d+:\d+(?::\d+)?$/.test(isoDuration.trim())) {
+    return isoDuration.trim();
+  }
   const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return "";
   const hours = parseInt(match[1] || "0", 10);
@@ -95,8 +101,12 @@ export function formatDuration(isoDuration?: string): string {
 }
 
 export function formatTimeAgo(dateString: string): string {
+  if (!dateString) return "";
+  if (dateString.includes("ago") || dateString.includes("Streamed")) {
+    return dateString;
+  }
   const date = new Date(dateString);
-  if (isNaN(date.getTime())) return "";
+  if (isNaN(date.getTime())) return dateString;
   const now = new Date();
   const diffSeconds = Math.max(1, Math.floor((now.getTime() - date.getTime()) / 1000));
 
@@ -173,6 +183,11 @@ export async function fetchPopularVideos(options: {
   const key = getResolvedApiKey(options.apiKey);
   const maxResults = options.maxResults || 16;
 
+  // If a search query is provided (either search bar or topic query), use searchYouTubeVideos (powered by /api/search)
+  if (options.query && options.query.trim()) {
+    return await searchYouTubeVideos(options.query.trim(), key, maxResults, options.pageToken);
+  }
+
   if (!key) {
     return {
       videos: filterDemoVideos(options.categoryId, options.query),
@@ -182,11 +197,6 @@ export async function fetchPopularVideos(options: {
   }
 
   try {
-    // If a search query is provided (either search bar or topic query), use search endpoint + enrich with stats/duration
-    if (options.query && options.query.trim()) {
-      return await searchYouTubeVideos(options.query.trim(), key, maxResults, options.pageToken);
-    }
-
     const params = new URLSearchParams({
       part: "snippet,contentDetails,statistics",
       chart: "mostPopular",
@@ -232,6 +242,30 @@ export async function searchYouTubeVideos(
   maxResults = 16,
   pageToken?: string
 ): Promise<{ videos: VideoItem[]; nextPageToken?: string; isDemo: boolean; error?: string }> {
+  // Primary: Use our Next.js /api/search endpoint (unlimited quota, real thumbnails, real channel avatars & continuation pagination)
+  try {
+    const apiParams = new URLSearchParams({
+      q: query,
+      maxResults: String(maxResults),
+    });
+    if (pageToken && !pageToken.startsWith("demo_")) {
+      apiParams.set("pageToken", pageToken);
+    }
+    const localSearchRes = await fetch(`/api/search?${apiParams.toString()}`);
+    if (localSearchRes.ok) {
+      const localData = await localSearchRes.json();
+      if (Array.isArray(localData.videos) && localData.videos.length > 0) {
+        return {
+          videos: localData.videos,
+          nextPageToken: localData.nextPageToken,
+          isDemo: false,
+        };
+      }
+    }
+  } catch {
+    // Fallback to YouTube Data API v3 below
+  }
+
   const key = getResolvedApiKey(apiKey);
   if (!key) {
     return {
@@ -273,7 +307,6 @@ export async function searchYouTubeVideos(
       return { videos: [], nextPageToken: undefined, isDemo: false };
     }
 
-    // Fetch statistics and contentDetails (duration, views, likes) in a single batch request
     const detailsParams = new URLSearchParams({
       part: "snippet,contentDetails,statistics",
       id: videoIds,
