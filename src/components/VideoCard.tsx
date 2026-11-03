@@ -6,6 +6,7 @@ import { Bookmark, Check, Play, Headphones, Tv } from "lucide-react";
 import { VideoItem } from "@/types/youtube";
 import { formatViewCount, formatDuration, formatTimeAgo } from "@/lib/youtube";
 import { useApp } from "@/context/AppContext";
+import { startBackgroundAudioKeepAlive } from "@/lib/backgroundAudio";
 
 interface VideoCardProps {
   video: VideoItem;
@@ -50,7 +51,10 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
     return (
       <Link
         href={`/watch/${video.id}`}
-        onClick={() => closePlayer()}
+        onClick={() => {
+          closePlayer();
+          startBackgroundAudioKeepAlive();
+        }}
         className={`group flex gap-3 p-2.5 rounded-2xl border transition-all ${
           isNowPlaying
             ? "bg-red-500/10 border-red-500/30"
@@ -131,7 +135,11 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
     >
       {/* Real Thumbnail Container (Bright & Unobstructed) */}
       <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-800 shadow-xs">
-        <Link href={`/watch/${video.id}`} className="block w-full h-full">
+        <Link
+          href={`/watch/${video.id}`}
+          onClick={() => startBackgroundAudioKeepAlive()}
+          className="block w-full h-full"
+        >
           <img
             src={thumbSrc}
             alt={video.title}
@@ -187,6 +195,7 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
         {/* Watch Video Play Button (Bottom-Right of Thumbnail) */}
         <Link
           href={`/watch/${video.id}`}
+          onClick={() => startBackgroundAudioKeepAlive()}
           title="Watch Video"
           className="absolute bottom-2.5 right-2.5 w-10 h-10 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 translate-y-1 opacity-95 sm:opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-200 active:scale-95"
         >
@@ -215,6 +224,7 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
           <div className="flex-1 min-w-0">
             <Link
               href={`/watch/${video.id}`}
+              onClick={() => startBackgroundAudioKeepAlive()}
               className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug group-hover:text-red-500 transition-colors"
             >
               {video.title}

@@ -29,6 +29,15 @@ import {
 } from "@/lib/youtube";
 import { VideoItem, CommentItem } from "@/types/youtube";
 import VideoCard from "@/components/VideoCard";
+import {
+  installMobileBackgroundSupport,
+  startBackgroundAudioKeepAlive,
+  stopBackgroundAudioKeepAlive,
+  updateLockScreenMediaSession,
+  updateMediaSessionPlaybackState,
+  updateMediaSessionPosition,
+  wasRecentlyBackgrounded,
+} from "@/lib/backgroundAudio";
 
 export default function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: videoId } = use(params);
@@ -60,6 +69,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const playerReadyRef = useRef<boolean>(false);
   const currentVideoIdRef = useRef<string>(videoId);
   const lastEndedVideoIdRef = useRef<string | null>(null);
+  const userIntendedPlayRef = useRef<boolean>(true);
   const playedIdsRef = useRef<Set<string>>(new Set([videoId]));
   const relatedVideosRef = useRef<VideoItem[]>([]);
   const queueRef = useRef<VideoItem[]>(queue);
@@ -68,6 +78,8 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     currentVideoIdRef.current = videoId;
     playedIdsRef.current.add(videoId);
+    userIntendedPlayRef.current = true;
+    startBackgroundAudioKeepAlive();
   }, [videoId]);
 
   useEffect(() => {
@@ -81,6 +93,31 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     autoPlayNextRef.current = autoPlayNext;
   }, [autoPlayNext]);
+
+  const forceResumeWatchPlayback = useCallback(() => {
+    if (!userIntendedPlayRef.current) return;
+    startBackgroundAudioKeepAlive();
+    updateMediaSessionPlaybackState(true);
+    const delays = [0, 120, 350, 800, 1600, 2800];
+    delays.forEach((ms) => {
+      setTimeout(() => {
+        if (!userIntendedPlayRef.current || !playerRef.current) return;
+        try {
+          playerRef.current.playVideo?.();
+          startBackgroundAudioKeepAlive();
+          updateMediaSessionPlaybackState(true);
+        } catch {}
+      }, ms);
+    });
+  }, []);
+
+  useEffect(() => {
+    return installMobileBackgroundSupport(() => {
+      if (userIntendedPlayRef.current) {
+        forceResumeWatchPlayback();
+      }
+    });
+  }, [forceResumeWatchPlayback]);
 
   const handlePlayNextVideo = useCallback(
     (force = false) => {
@@ -121,6 +158,8 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
       if (nextVideo) {
         playedIdsRef.current.add(nextVideo.id);
+        userIntendedPlayRef.current = true;
+        startBackgroundAudioKeepAlive();
         router.push(`/watch/${nextVideo.id}`);
       }
     },
@@ -131,6 +170,37 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     handlePlayNextRef.current = handlePlayNextVideo;
   }, [handlePlayNextVideo]);
+
+  // Register Lock-Screen MediaSession when video metadata loads on WatchPage
+  useEffect(() => {
+    if (!video) return;
+    updateLockScreenMediaSession(
+      video,
+      {
+        onPlay: () => {
+          userIntendedPlayRef.current = true;
+          startBackgroundAudioKeepAlive();
+          playerRef.current?.playVideo?.();
+          updateMediaSessionPlaybackState(true);
+        },
+        onPause: () => {
+          userIntendedPlayRef.current = false;
+          stopBackgroundAudioKeepAlive();
+          playerRef.current?.pauseVideo?.();
+          updateMediaSessionPlaybackState(false);
+        },
+        onNext: () => {
+          userIntendedPlayRef.current = true;
+          startBackgroundAudioKeepAlive();
+          handlePlayNextRef.current(true);
+        },
+        onSeekTo: (seconds: number) => {
+          playerRef.current?.seekTo?.(seconds, true);
+        },
+      },
+      true
+    );
+  }, [video]);
 
   // Load YouTube IFrame API script
   useEffect(() => {
@@ -170,6 +240,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
     currentVideoIdRef.current = videoId;
     lastEndedVideoIdRef.current = null;
+    userIntendedPlayRef.current = true;
 
     if (playerRef.current) {
       if (
@@ -178,6 +249,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       ) {
         playerRef.current.loadVideoById(videoId);
         playerRef.current.playVideo?.();
+        startBackgroundAudioKeepAlive();
       }
       return;
     }
@@ -213,22 +285,42 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             event.target.loadVideoById(latestId);
           }
           event.target.playVideo?.();
+          startBackgroundAudioKeepAlive();
+          updateMediaSessionPlaybackState(true);
         },
         onStateChange: (event: any) => {
           const state = event.data;
           if (state === window.YT.PlayerState.PLAYING) {
             lastEndedVideoIdRef.current = null;
+            userIntendedPlayRef.current = true;
+            startBackgroundAudioKeepAlive();
+            updateMediaSessionPlaybackState(true);
+          } else if (state === window.YT.PlayerState.PAUSED) {
+            // If paused because mobile screen just locked or tab backgrounded, auto-resume!
+            if (userIntendedPlayRef.current && wasRecentlyBackgrounded(4500)) {
+              try {
+                event.target.playVideo?.();
+              } catch {}
+              forceResumeWatchPlayback();
+            } else {
+              userIntendedPlayRef.current = false;
+              stopBackgroundAudioKeepAlive();
+              updateMediaSessionPlaybackState(false);
+            }
           } else if (state === window.YT.PlayerState.CUED) {
-            event.target.playVideo?.();
+            if (userIntendedPlayRef.current) {
+              event.target.playVideo?.();
+              startBackgroundAudioKeepAlive();
+            }
           } else if (state === window.YT.PlayerState.ENDED) {
             handlePlayNextRef.current(false);
           }
         },
       },
     });
-  }, [videoId, apiReady]);
+  }, [videoId, apiReady, forceResumeWatchPlayback]);
 
-  // Fallback polling for ENDED state on Watch Page
+  // Polling for ENDED state, lock-screen auto-resume, and MediaSession position on Watch Page
   useEffect(() => {
     if (!apiReady) return;
     const timer = setInterval(() => {
@@ -237,6 +329,18 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         const state = playerRef.current.getPlayerState?.();
         if (state === 0) {
           handlePlayNextRef.current(false);
+        } else if (
+          state === 2 &&
+          userIntendedPlayRef.current &&
+          wasRecentlyBackgrounded(5000)
+        ) {
+          playerRef.current.playVideo?.();
+          startBackgroundAudioKeepAlive();
+          updateMediaSessionPlaybackState(true);
+        } else if (state === 1) {
+          const duration = playerRef.current.getDuration?.() ?? 0;
+          const currentTime = playerRef.current.getCurrentTime?.() ?? 0;
+          updateMediaSessionPosition(duration, currentTime);
         }
       } catch {}
     }, 1000);

@@ -16,6 +16,15 @@ import {
   VolumeX,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
+import {
+  installMobileBackgroundSupport,
+  startBackgroundAudioKeepAlive,
+  stopBackgroundAudioKeepAlive,
+  updateLockScreenMediaSession,
+  updateMediaSessionPlaybackState,
+  updateMediaSessionPosition,
+  wasRecentlyBackgrounded,
+} from "@/lib/backgroundAudio";
 
 declare global {
   interface Window {
@@ -40,9 +49,15 @@ export default function StreamPlayer() {
   const playerReadyRef = useRef<boolean>(false);
   const currentVideoIdRef = useRef<string | null>(null);
   const lastEndedVideoIdRef = useRef<string | null>(null);
+  const userIntendedPlayRef = useRef<boolean>(true);
+  const streamModeRef = useRef(streamMode);
 
   const playNextRef = useRef(playNext);
   const playPreviousRef = useRef(playPrevious);
+
+  useEffect(() => {
+    streamModeRef.current = streamMode;
+  }, [streamMode]);
 
   useEffect(() => {
     playNextRef.current = playNext;
@@ -56,11 +71,39 @@ export default function StreamPlayer() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [apiReady, setApiReady] = useState<boolean>(false);
 
+  const forceResumePlayback = () => {
+    if (!userIntendedPlayRef.current || !currentVideoIdRef.current) return;
+    startBackgroundAudioKeepAlive();
+    updateMediaSessionPlaybackState(true);
+    const delays = [0, 120, 350, 800, 1600, 2800];
+    delays.forEach((ms) => {
+      setTimeout(() => {
+        if (!userIntendedPlayRef.current || !playerRef.current) return;
+        try {
+          playerRef.current.playVideo?.();
+          startBackgroundAudioKeepAlive();
+          updateMediaSessionPlaybackState(true);
+        } catch {}
+      }, ms);
+    });
+  };
+
+  // Install mobile lock-screen & background visibility keep-alive listener
+  useEffect(() => {
+    return installMobileBackgroundSupport(() => {
+      if (userIntendedPlayRef.current && currentVideoIdRef.current) {
+        forceResumePlayback();
+      }
+    });
+  }, []);
+
   const triggerAutoNext = () => {
     const activeId = currentVideoIdRef.current;
     if (!activeId) return;
     if (lastEndedVideoIdRef.current === activeId) return;
     lastEndedVideoIdRef.current = activeId;
+    userIntendedPlayRef.current = true;
+    startBackgroundAudioKeepAlive();
     playNextRef.current();
   };
 
@@ -102,41 +145,43 @@ export default function StreamPlayer() {
 
     currentVideoIdRef.current = currentTrack.id;
     lastEndedVideoIdRef.current = null;
+    userIntendedPlayRef.current = true;
+    startBackgroundAudioKeepAlive();
 
-    // Update OS / Mobile Lock-Screen MediaSession metadata
-    if ("mediaSession" in navigator) {
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: currentTrack.title,
-          artist: currentTrack.channelTitle,
-          album: "PlayTube Stream",
-          artwork: [
-            {
-              src: currentTrack.thumbnailUrl,
-              sizes: "480x360",
-              type: "image/jpeg",
-            },
-          ],
-        });
-
-        navigator.mediaSession.setActionHandler("play", () => {
+    // Update OS / Mobile Lock-Screen MediaSession metadata & handlers
+    updateLockScreenMediaSession(
+      currentTrack,
+      {
+        onPlay: () => {
+          userIntendedPlayRef.current = true;
+          startBackgroundAudioKeepAlive();
           playerRef.current?.playVideo?.();
           setIsPlaying(true);
-        });
-        navigator.mediaSession.setActionHandler("pause", () => {
+          updateMediaSessionPlaybackState(true);
+        },
+        onPause: () => {
+          userIntendedPlayRef.current = false;
+          stopBackgroundAudioKeepAlive();
           playerRef.current?.pauseVideo?.();
           setIsPlaying(false);
-        });
-        navigator.mediaSession.setActionHandler("previoustrack", () => {
+          updateMediaSessionPlaybackState(false);
+        },
+        onPrevious: () => {
+          userIntendedPlayRef.current = true;
+          startBackgroundAudioKeepAlive();
           playPreviousRef.current();
-        });
-        navigator.mediaSession.setActionHandler("nexttrack", () => {
+        },
+        onNext: () => {
+          userIntendedPlayRef.current = true;
+          startBackgroundAudioKeepAlive();
           playNextRef.current();
-        });
-      } catch {
-        // Ignore unsupported mediaSession handlers
-      }
-    }
+        },
+        onSeekTo: (seconds: number) => {
+          playerRef.current?.seekTo?.(seconds, true);
+        },
+      },
+      true
+    );
 
     // If player already exists, load the new track without re-creating the instance
     if (playerRef.current) {
@@ -182,18 +227,41 @@ export default function StreamPlayer() {
             event.target.loadVideoById(latestId);
           }
           event.target.playVideo?.();
+          startBackgroundAudioKeepAlive();
           setIsPlaying(true);
+          updateMediaSessionPlaybackState(true);
         },
         onStateChange: (event: any) => {
           const state = event.data;
           if (state === window.YT.PlayerState.PLAYING) {
             lastEndedVideoIdRef.current = null;
             setIsPlaying(true);
+            startBackgroundAudioKeepAlive();
+            updateMediaSessionPlaybackState(true);
           } else if (state === window.YT.PlayerState.PAUSED) {
-            setIsPlaying(false);
+            // If the user did NOT click Pause (e.g. mobile screen locked or browser backgrounded),
+            // immediately auto-resume playback so music continues with the screen locked!
+            if (
+              userIntendedPlayRef.current &&
+              (streamModeRef.current === "music" || wasRecentlyBackgrounded(4500))
+            ) {
+              try {
+                event.target.playVideo?.();
+              } catch {}
+              forceResumePlayback();
+              setIsPlaying(true);
+            } else {
+              userIntendedPlayRef.current = false;
+              setIsPlaying(false);
+              stopBackgroundAudioKeepAlive();
+              updateMediaSessionPlaybackState(false);
+            }
           } else if (state === window.YT.PlayerState.CUED) {
-            event.target.playVideo?.();
-            setIsPlaying(true);
+            if (userIntendedPlayRef.current) {
+              event.target.playVideo?.();
+              startBackgroundAudioKeepAlive();
+              setIsPlaying(true);
+            }
           } else if (state === window.YT.PlayerState.ENDED) {
             triggerAutoNext();
           }
@@ -207,7 +275,7 @@ export default function StreamPlayer() {
     });
   }, [currentTrack, apiReady]);
 
-  // Fallback polling for ENDED state (handles background tab throttling on mobile/desktop)
+  // Polling for ENDED state, lock-screen auto-resume, and MediaSession position updates
   useEffect(() => {
     if (!currentTrack || !apiReady) return;
     const timer = setInterval(() => {
@@ -216,6 +284,19 @@ export default function StreamPlayer() {
         const state = playerRef.current.getPlayerState?.();
         if (state === 0) {
           triggerAutoNext();
+        } else if (
+          state === 2 &&
+          userIntendedPlayRef.current &&
+          (streamModeRef.current === "music" || wasRecentlyBackgrounded(5000))
+        ) {
+          playerRef.current.playVideo?.();
+          startBackgroundAudioKeepAlive();
+          updateMediaSessionPlaybackState(true);
+          setIsPlaying(true);
+        } else if (state === 1) {
+          const duration = playerRef.current.getDuration?.() ?? 0;
+          const currentTime = playerRef.current.getCurrentTime?.() ?? 0;
+          updateMediaSessionPosition(duration, currentTime);
         }
       } catch {}
     }, 1000);
@@ -225,6 +306,7 @@ export default function StreamPlayer() {
   // Cleanup player when closed
   useEffect(() => {
     if (!currentTrack && playerRef.current) {
+      stopBackgroundAudioKeepAlive();
       try {
         playerRef.current.destroy?.();
       } catch {}
@@ -246,11 +328,17 @@ export default function StreamPlayer() {
   const togglePlayPause = () => {
     if (!playerRef.current) return;
     if (isPlaying) {
+      userIntendedPlayRef.current = false;
+      stopBackgroundAudioKeepAlive();
       playerRef.current.pauseVideo?.();
       setIsPlaying(false);
+      updateMediaSessionPlaybackState(false);
     } else {
+      userIntendedPlayRef.current = true;
+      startBackgroundAudioKeepAlive();
       playerRef.current.playVideo?.();
       setIsPlaying(true);
+      updateMediaSessionPlaybackState(true);
     }
   };
 
@@ -267,12 +355,12 @@ export default function StreamPlayer() {
 
   return (
     <>
-      {/* Floating Video Preview Window (Visible in Video Mode, hidden in Music Mode but kept in DOM at >=200x200 so audio & next-track autoplay work continuously on mobile & desktop) */}
+      {/* Floating Video Preview Window (In Music Mode, kept in foreground z-50 over the mini dock thumbnail so mobile browsers never mark the iframe as occluded when locking the screen) */}
       <div
         className={`fixed transition-all duration-300 overflow-hidden shadow-2xl border border-zinc-700/80 bg-black ${
           streamMode === "video" && !isOnSameWatchPage
             ? "z-50 bottom-32 md:bottom-24 right-3 sm:right-6 w-64 sm:w-80 aspect-video rounded-2xl opacity-100 pointer-events-auto"
-            : "-z-10 bottom-0 right-0 w-[200px] h-[200px] opacity-[0.001] pointer-events-none"
+            : "z-50 bottom-16 md:bottom-2 left-3 sm:left-6 w-11 h-11 rounded-xl opacity-[0.03] pointer-events-none"
         }`}
       >
         <div ref={wrapperRef} className="w-full h-full" />

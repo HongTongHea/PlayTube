@@ -4,6 +4,10 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { VideoItem } from "@/types/youtube";
 import { getResolvedApiKey } from "@/lib/youtube";
 import { DEMO_VIDEOS } from "@/lib/mockData";
+import {
+  startBackgroundAudioKeepAlive,
+  stopBackgroundAudioKeepAlive,
+} from "@/lib/backgroundAudio";
 
 export type NavSection = "home" | "trending" | "saved" | "history";
 export type StreamMode = "video" | "music";
@@ -213,6 +217,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const playTrack = useCallback(
     (video: VideoItem, mode: StreamMode = "music", list?: VideoItem[]) => {
+      startBackgroundAudioKeepAlive();
       currentTrackRef.current = video;
       setCurrentTrack(video);
       setStreamMode(mode);
@@ -250,6 +255,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (nextVideo) {
+      startBackgroundAudioKeepAlive();
       currentTrackRef.current = nextVideo;
       setCurrentTrack(nextVideo);
       addToHistory(nextVideo);
@@ -266,6 +272,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const prevIdx = idx > 0 ? idx - 1 : activeQueue.length - 1;
     const prevVideo = activeQueue[prevIdx];
     if (prevVideo) {
+      startBackgroundAudioKeepAlive();
       currentTrackRef.current = prevVideo;
       setCurrentTrack(prevVideo);
       addToHistory(prevVideo);
@@ -273,6 +280,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [addToHistory]);
 
   const closePlayer = useCallback(() => {
+    stopBackgroundAudioKeepAlive();
     currentTrackRef.current = null;
     setCurrentTrack(null);
   }, []);
