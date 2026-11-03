@@ -67,7 +67,7 @@ export default function Sidebar() {
   };
 
   const navItems = [
-    { id: "home", label: "Home", fullLabel: "Home Feed", icon: Home },
+    { id: "home", label: "Home", fullLabel: "Home", icon: Home },
     { id: "trending", label: "Trending", fullLabel: "Trending Now", icon: Flame },
     {
       id: "saved",
@@ -117,11 +117,10 @@ export default function Sidebar() {
                   <button
                     key={item.id}
                     onClick={() => handleNavClick(item.id as NavSection)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                      isActive
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive
                         ? "bg-red-500/10 text-red-600 dark:text-red-400 font-semibold"
                         : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/70"
-                    }`}
+                      }`}
                   >
                     <span className="flex items-center gap-3">
                       <Icon className="w-4 h-4" />
@@ -149,11 +148,10 @@ export default function Sidebar() {
                     <button
                       key={cat.id}
                       onClick={() => handleCategoryClick(cat.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
-                        isSelected
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${isSelected
                           ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-medium"
                           : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
-                      }`}
+                        }`}
                     >
                       {CATEGORY_ICONS[cat.id] || <Flame className="w-4 h-4" />}
                       <span className="truncate">{cat.label}</span>
@@ -176,11 +174,10 @@ export default function Sidebar() {
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id as NavSection)}
-                className={`flex flex-col items-center justify-center w-14 py-2.5 rounded-xl text-[11px] font-medium transition-colors gap-1 ${
-                  active
+                className={`flex flex-col items-center justify-center w-14 py-2.5 rounded-xl text-[11px] font-medium transition-colors gap-1 ${active
                     ? "bg-red-500/10 text-red-600 dark:text-red-400"
                     : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/70"
-                }`}
+                  }`}
               >
                 <Icon className="w-5 h-5" />
                 <span>{item.label}</span>
@@ -200,11 +197,10 @@ export default function Sidebar() {
                   <button
                     key={item.id}
                     onClick={() => handleNavClick(item.id as NavSection)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                      isActive
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive
                         ? "bg-red-500/10 text-red-600 dark:text-red-400 font-semibold"
                         : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/70"
-                    }`}
+                      }`}
                   >
                     <span className="flex items-center gap-3">
                       <Icon className="w-4 h-4" />
@@ -233,11 +229,10 @@ export default function Sidebar() {
                     <button
                       key={cat.id}
                       onClick={() => handleCategoryClick(cat.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
-                        isSelected
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${isSelected
                           ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-medium"
                           : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
-                      }`}
+                        }`}
                     >
                       {CATEGORY_ICONS[cat.id] || <Flame className="w-4 h-4" />}
                       <span className="truncate">{cat.label}</span>
@@ -259,11 +254,10 @@ export default function Sidebar() {
             <button
               key={item.id}
               onClick={() => handleNavClick(item.id as NavSection)}
-              className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-xl text-[10px] font-medium transition-colors gap-0.5 ${
-                active
+              className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-xl text-[10px] font-medium transition-colors gap-0.5 ${active
                   ? "text-red-500 font-semibold"
                   : "text-zinc-500 dark:text-zinc-400"
-              }`}
+                }`}
             >
               <Icon className="w-5 h-5" />
               <span>{item.label}</span>
