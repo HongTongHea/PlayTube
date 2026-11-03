@@ -14,7 +14,7 @@ interface VideoCardProps {
 }
 
 export default function VideoCard({ video, compact = false, playlist }: VideoCardProps) {
-  const { toggleSaveVideo, isVideoSaved, currentTrack, playTrack } = useApp();
+  const { toggleSaveVideo, isVideoSaved, currentTrack, playTrack, closePlayer } = useApp();
   const saved = isVideoSaved(video.id);
   const isNowPlaying = currentTrack?.id === video.id;
   const durationBadge = formatDuration(video.duration);
@@ -48,7 +48,9 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
 
   if (compact) {
     return (
-      <div
+      <Link
+        href={`/watch/${video.id}`}
+        onClick={() => closePlayer()}
         className={`group flex gap-3 p-2.5 rounded-2xl border transition-all ${
           isNowPlaying
             ? "bg-red-500/10 border-red-500/30"
@@ -56,16 +58,14 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
         }`}
       >
         <div className="relative w-36 sm:w-40 aspect-video rounded-xl overflow-hidden bg-zinc-200 dark:bg-zinc-800 shrink-0">
-          <Link href={`/watch/${video.id}`} className="block w-full h-full">
-            <img
-              src={thumbSrc}
-              alt={video.title}
-              referrerPolicy="no-referrer"
-              onError={handleThumbError}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              loading="lazy"
-            />
-          </Link>
+          <img
+            src={thumbSrc}
+            alt={video.title}
+            referrerPolicy="no-referrer"
+            onError={handleThumbError}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+          />
           {durationBadge && (
             <span
               className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide ${
@@ -77,29 +77,18 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
               {durationBadge}
             </span>
           )}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              playTrack(video, "music", playlist);
-            }}
-            title="Stream in background player"
-            className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-          >
+          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
             <span className="w-9 h-9 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg">
               <Play className="w-4 h-4 fill-white ml-0.5" />
             </span>
-          </button>
+          </div>
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
           <div>
-            <Link
-              href={`/watch/${video.id}`}
-              className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-2 group-hover:text-red-500 transition-colors leading-snug"
-            >
+            <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-2 group-hover:text-red-500 transition-colors leading-snug">
               {video.title}
-            </Link>
+            </h3>
             <div className="mt-1.5 flex items-center gap-1.5">
               <div className="w-4 h-4 rounded-full overflow-hidden bg-gradient-to-br from-red-600 to-rose-700 text-white font-bold text-[9px] flex items-center justify-center shrink-0">
                 {video.channelAvatar && !avatarError ? (
@@ -126,17 +115,9 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
               <span>•</span>
               <span>{formatTimeAgo(video.publishedAt)}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => playTrack(video, "music", playlist)}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0"
-              title="Play as Music Stream"
-            >
-              <Headphones className="w-3.5 h-3.5" />
-            </button>
           </div>
         </div>
-      </div>
+      </Link>
     );
   }
 
@@ -203,18 +184,14 @@ export default function VideoCard({ video, compact = false, playlist }: VideoCar
           {saved ? <Check className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
         </button>
 
-        {/* Music Stream Floating Play Button (Bottom-Right of Thumbnail) */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            playTrack(video, "music", playlist);
-          }}
-          title="Play immediately in Music/Stream Bar"
+        {/* Watch Video Play Button (Bottom-Right of Thumbnail) */}
+        <Link
+          href={`/watch/${video.id}`}
+          title="Watch Video"
           className="absolute bottom-2.5 right-2.5 w-10 h-10 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 translate-y-1 opacity-95 sm:opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-200 active:scale-95"
         >
           <Play className="w-4 h-4 fill-white ml-0.5" />
-        </button>
+        </Link>
       </div>
 
       {/* Track / Video Metadata + Real Channel Avatar + Stream Actions */}

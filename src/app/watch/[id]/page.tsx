@@ -31,7 +31,7 @@ import VideoCard from "@/components/VideoCard";
 
 export default function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: videoId } = use(params);
-  const { apiKey, toggleSaveVideo, isVideoSaved, addToHistory, playTrack } = useApp();
+  const { apiKey, toggleSaveVideo, isVideoSaved, addToHistory, playTrack, closePlayer } = useApp();
   const router = useRouter();
 
   const [video, setVideo] = useState<VideoItem | null>(null);
@@ -45,6 +45,10 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
   useEffect(() => {
     let cancelled = false;
+    closePlayer();
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
 
     async function loadWatchData() {
       const [detailsRes, commentsRes] = await Promise.all([
@@ -188,6 +192,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             }`}
           >
             <iframe
+              key={videoId}
               src={embedUrl}
               title={video?.title || "PlayTube Video Player"}
               className="w-full h-full border-0"
