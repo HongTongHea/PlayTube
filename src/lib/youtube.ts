@@ -1,9 +1,33 @@
 import { VideoItem, CommentItem } from "@/types/youtube";
-import { DEMO_VIDEOS, DEMO_COMMENTS } from "@/lib/mockData";
+import { DEMO_VIDEOS, DEMO_COMMENTS, DISCOVERY_QUERY_POOLS } from "@/lib/mockData";
 
 const YT_BASE_URL = "https://www.googleapis.com/youtube/v3";
 const DEFAULT_YOUTUBE_API_KEY = "AIzaSyCKDFWdLvKs-6Z8XBnCIIFnGySXWtwmA7E";
 const channelAvatarCache = new Map<string, string>();
+const lastUsedQueryByPool = new Map<string, string>();
+
+export function shuffleVideos<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+export function pickRandomDiscoveryQueries(poolKey = "all", count = 2): string[] {
+  const pool =
+    DISCOVERY_QUERY_POOLS[poolKey] ||
+    DISCOVERY_QUERY_POOLS.all;
+  const lastQuery = lastUsedQueryByPool.get(poolKey);
+  const candidates = pool.filter((q) => q !== lastQuery);
+  const shuffled = shuffleVideos(candidates.length > 0 ? candidates : pool);
+  const selected = shuffled.slice(0, Math.max(1, count));
+  if (selected[0]) {
+    lastUsedQueryByPool.set(poolKey, selected[0]);
+  }
+  return selected;
+}
 
 async function enrichVideosWithChannelAvatars(
   videos: VideoItem[],
@@ -175,17 +199,68 @@ export async function verifyYouTubeApiKey(apiKey: string): Promise<{ valid: bool
 
 export async function fetchPopularVideos(options: {
   apiKey?: string;
+  categoryKey?: string;
   categoryId?: string;
   query?: string;
   maxResults?: number;
   pageToken?: string;
+  shuffle?: boolean;
 }): Promise<{ videos: VideoItem[]; nextPageToken?: string; isDemo: boolean; error?: string }> {
   const key = getResolvedApiKey(options.apiKey);
   const maxResults = options.maxResults || 16;
+  const shouldShuffle = options.shuffle !== false;
+
+  // When loading discovery feeds (Home, Trending, or Category tabs) without a continuation token,
+  // pick 2 rotating discovery queries in parallel and shuffle the combined pool so every page refresh
+  // loads fresh videos & songs!
+  if (!options.pageToken && options.categoryKey) {
+    const pickedQueries = pickRandomDiscoveryQueries(options.categoryKey, 2);
+    try {
+      const results = await Promise.all(
+        pickedQueries.map((q) =>
+          searchYouTubeVideos(q, key, Math.ceil(maxResults * 0.8), undefined, true)
+        )
+      );
+      const merged: VideoItem[] = [];
+      const seen = new Set<string>();
+      let token: string | undefined = undefined;
+
+      for (const res of results) {
+        if (!token && res.nextPageToken) {
+          token = res.nextPageToken;
+        }
+        for (const v of res.videos) {
+          if (!seen.has(v.id)) {
+            seen.add(v.id);
+            merged.push(v);
+          }
+        }
+      }
+
+      if (merged.length > 0) {
+        const finalVideos = shouldShuffle
+          ? shuffleVideos(merged).slice(0, maxResults)
+          : merged.slice(0, maxResults);
+        return {
+          videos: finalVideos,
+          nextPageToken: token,
+          isDemo: false,
+        };
+      }
+    } catch {
+      // Fallback below if parallel discovery fails
+    }
+  }
 
   // If a search query is provided (either search bar or topic query), use searchYouTubeVideos (powered by /api/search)
   if (options.query && options.query.trim()) {
-    return await searchYouTubeVideos(options.query.trim(), key, maxResults, options.pageToken);
+    return await searchYouTubeVideos(
+      options.query.trim(),
+      key,
+      maxResults,
+      options.pageToken,
+      shouldShuffle
+    );
   }
 
   if (!key) {
@@ -201,7 +276,7 @@ export async function fetchPopularVideos(options: {
       part: "snippet,contentDetails,statistics",
       chart: "mostPopular",
       regionCode: "US",
-      maxResults: String(maxResults),
+      maxResults: String(Math.max(maxResults, 24)),
       key,
     });
 
@@ -212,7 +287,9 @@ export async function fetchPopularVideos(options: {
       params.set("pageToken", options.pageToken);
     }
 
-    const res = await fetch(`${YT_BASE_URL}/videos?${params.toString()}`);
+    const res = await fetch(`${YT_BASE_URL}/videos?${params.toString()}`, {
+      cache: "no-store",
+    });
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson?.error?.message || `YouTube API returned ${res.status}`);
@@ -220,7 +297,10 @@ export async function fetchPopularVideos(options: {
 
     const data = await res.json();
     const rawVideos: VideoItem[] = (data.items || []).map(mapYouTubeVideoItem);
-    const videos = await enrichVideosWithChannelAvatars(rawVideos, key);
+    const enriched = await enrichVideosWithChannelAvatars(rawVideos, key);
+    const videos = shouldShuffle
+      ? shuffleVideos(enriched).slice(0, maxResults)
+      : enriched.slice(0, maxResults);
     return {
       videos,
       nextPageToken: data.nextPageToken,
@@ -240,18 +320,25 @@ export async function searchYouTubeVideos(
   query: string,
   apiKey?: string,
   maxResults = 16,
-  pageToken?: string
+  pageToken?: string,
+  shuffle = false
 ): Promise<{ videos: VideoItem[]; nextPageToken?: string; isDemo: boolean; error?: string }> {
   // Primary: Use our Next.js /api/search endpoint (unlimited quota, real thumbnails, real channel avatars & continuation pagination)
   try {
     const apiParams = new URLSearchParams({
       q: query,
       maxResults: String(maxResults),
+      _t: String(Date.now()),
     });
+    if (shuffle) {
+      apiParams.set("shuffle", "1");
+    }
     if (pageToken && !pageToken.startsWith("demo_")) {
       apiParams.set("pageToken", pageToken);
     }
-    const localSearchRes = await fetch(`/api/search?${apiParams.toString()}`);
+    const localSearchRes = await fetch(`/api/search?${apiParams.toString()}`, {
+      cache: "no-store",
+    });
     if (localSearchRes.ok) {
       const localData = await localSearchRes.json();
       if (Array.isArray(localData.videos) && localData.videos.length > 0) {
@@ -289,7 +376,9 @@ export async function searchYouTubeVideos(
       searchParams.set("pageToken", pageToken);
     }
 
-    const searchRes = await fetch(`${YT_BASE_URL}/search?${searchParams.toString()}`);
+    const searchRes = await fetch(`${YT_BASE_URL}/search?${searchParams.toString()}`, {
+      cache: "no-store",
+    });
     if (!searchRes.ok) {
       const errJson = await searchRes.json().catch(() => ({}));
       throw new Error(errJson?.error?.message || `YouTube Search API returned ${searchRes.status}`);
@@ -313,13 +402,15 @@ export async function searchYouTubeVideos(
       key,
     });
 
-    const detailsRes = await fetch(`${YT_BASE_URL}/videos?${detailsParams.toString()}`);
+    const detailsRes = await fetch(`${YT_BASE_URL}/videos?${detailsParams.toString()}`, {
+      cache: "no-store",
+    });
     if (detailsRes.ok) {
       const detailsData = await detailsRes.json();
       const rawVideos = (detailsData.items || []).map(mapYouTubeVideoItem);
       const enriched = await enrichVideosWithChannelAvatars(rawVideos, key);
       return {
-        videos: enriched,
+        videos: shuffle ? shuffleVideos(enriched) : enriched,
         nextPageToken: nextToken,
         isDemo: false,
       };
@@ -328,7 +419,7 @@ export async function searchYouTubeVideos(
     const fallbackMapped = items.map(mapYouTubeVideoItem);
     const enrichedFallback = await enrichVideosWithChannelAvatars(fallbackMapped, key);
     return {
-      videos: enrichedFallback,
+      videos: shuffle ? shuffleVideos(enrichedFallback) : enrichedFallback,
       nextPageToken: nextToken,
       isDemo: false,
     };
@@ -438,7 +529,7 @@ export async function fetchVideoComments(
 }
 
 function filterDemoVideos(categoryId?: string, query?: string): VideoItem[] {
-  let list = [...DEMO_VIDEOS];
+  let list = shuffleVideos([...DEMO_VIDEOS]);
 
   if (query && query.trim()) {
     const qWords = query

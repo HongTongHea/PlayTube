@@ -13,6 +13,7 @@ import {
   Loader2,
   Headphones,
   X,
+  RefreshCw,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { CATEGORIES } from "@/lib/mockData";
@@ -46,6 +47,8 @@ export default function HomePage() {
     savedVideos,
     watchHistory,
     clearHistory,
+    currentTrack,
+    setQueue,
     playTrack,
   } = useApp();
 
@@ -53,13 +56,23 @@ export default function HomePage() {
   const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [refreshSeed, setRefreshSeed] = useState<number>(0);
 
   const observerTarget = useRef<HTMLDivElement | null>(null);
+  const currentTrackRef = useRef(currentTrack);
   const router = useRouter();
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
   const directVideoId = searchQuery ? extractYouTubeId(searchQuery) : null;
 
-  // Initial feed load when section, category, or searchQuery changes
+  const handleManualRefresh = () => {
+    setRefreshSeed((prev) => prev + 1);
+  };
+
+  // Initial feed load when section, category, searchQuery, or refreshSeed changes
   useEffect(() => {
     let cancelled = false;
 
@@ -73,29 +86,39 @@ export default function HomePage() {
       setNextPageToken(undefined);
 
       try {
+        let res;
         if (searchQuery.trim()) {
-          const res = await searchYouTubeVideos(searchQuery.trim(), apiKey, 16);
-          if (!cancelled) {
-            setVideos(res.videos);
-            setNextPageToken(res.nextPageToken);
-          }
+          res = await searchYouTubeVideos(
+            searchQuery.trim(),
+            apiKey,
+            16,
+            undefined,
+            refreshSeed > 0
+          );
         } else if (activeSection === "trending") {
-          const res = await fetchPopularVideos({ apiKey, maxResults: 16 });
-          if (!cancelled) {
-            setVideos(res.videos);
-            setNextPageToken(res.nextPageToken);
-          }
+          res = await fetchPopularVideos({
+            apiKey,
+            categoryKey: "trending",
+            maxResults: 16,
+            shuffle: true,
+          });
         } else {
           const selectedCat = CATEGORIES.find((c) => c.id === activeCategory);
-          const res = await fetchPopularVideos({
+          res = await fetchPopularVideos({
             apiKey,
+            categoryKey: selectedCat?.id || "all",
             categoryId: selectedCat?.categoryId,
             query: selectedCat?.query,
             maxResults: 16,
+            shuffle: true,
           });
-          if (!cancelled) {
-            setVideos(res.videos);
-            setNextPageToken(res.nextPageToken);
+        }
+
+        if (!cancelled && res) {
+          setVideos(res.videos);
+          setNextPageToken(res.nextPageToken);
+          if (!currentTrackRef.current && res.videos.length > 0) {
+            setQueue(res.videos);
           }
         }
       } finally {
@@ -109,7 +132,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [apiKey, activeSection, activeCategory, searchQuery]);
+  }, [apiKey, activeSection, activeCategory, searchQuery, refreshSeed, setQueue]);
 
   // Load more videos when scrolling down (Infinite Scroll)
   const loadMoreVideos = useCallback(async () => {
@@ -131,6 +154,7 @@ export default function HomePage() {
       } else if (activeSection === "trending") {
         res = await fetchPopularVideos({
           apiKey,
+          categoryKey: "trending",
           maxResults: 12,
           pageToken: nextPageToken,
         });
@@ -138,6 +162,7 @@ export default function HomePage() {
         const selectedCat = CATEGORIES.find((c) => c.id === activeCategory);
         res = await fetchPopularVideos({
           apiKey,
+          categoryKey: selectedCat?.id || "all",
           categoryId: selectedCat?.categoryId,
           query: selectedCat?.query,
           maxResults: 12,
@@ -195,16 +220,22 @@ export default function HomePage() {
 
   return (
     <div className="max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-5">
-      {/* Top Category Pills + Play All Stream Button */}
+      {/* Top Category Pills + Refresh & Stream All Buttons */}
       {activeSection === "home" && !searchQuery && (
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
             {CATEGORIES.map((cat) => {
               const active = activeCategory === cat.id;
               return (
                 <button
                   key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
+                  onClick={() => {
+                    if (active) {
+                      handleManualRefresh();
+                    } else {
+                      setActiveCategory(cat.id);
+                    }
+                  }}
                   className={`px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
                     active
                       ? "bg-red-600 text-white shadow-sm shadow-red-600/20"
@@ -217,15 +248,27 @@ export default function HomePage() {
             })}
           </div>
 
-          {displayedVideos.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => playTrack(displayedVideos[0], "music", displayedVideos)}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 shrink-0 transition-opacity"
+              onClick={handleManualRefresh}
+              disabled={loading}
+              title="Refresh for new videos and songs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-zinc-200/80 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors"
             >
-              <Headphones className="w-3.5 h-3.5 text-red-500" />
-              Stream All
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-red-500" : ""}`} />
+              <span className="hidden sm:inline">New Mix</span>
             </button>
-          )}
+
+            {displayedVideos.length > 0 && (
+              <button
+                onClick={() => playTrack(displayedVideos[0], "music", displayedVideos)}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 shrink-0 transition-opacity"
+              >
+                <Headphones className="w-3.5 h-3.5 text-red-500" />
+                Stream All
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -335,24 +378,37 @@ export default function HomePage() {
             )}
           </div>
 
-          {activeSection === "history" && watchHistory.length > 0 && (
-            <button
-              onClick={clearHistory}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear Watch History
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {activeSection === "trending" && !searchQuery && (
+              <button
+                onClick={handleManualRefresh}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-red-500" : ""}`} />
+                Refresh
+              </button>
+            )}
 
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            >
-              Back to All
-            </button>
-          )}
+            {activeSection === "history" && watchHistory.length > 0 && (
+              <button
+                onClick={clearHistory}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear Watch History
+              </button>
+            )}
+
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+              >
+                Back to All
+              </button>
+            )}
+          </div>
         </div>
       )}
 

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { VideoItem } from "@/types/youtube";
 
+export const dynamic = "force-dynamic";
+
 function mapVideoRenderer(vr: any): VideoItem | null {
   const videoId = vr?.videoId;
   if (!videoId) return null;
@@ -77,6 +79,7 @@ export async function GET(req: NextRequest) {
   const query = searchParams.get("q")?.trim() || "";
   const pageToken = searchParams.get("pageToken")?.trim() || "";
   const maxResults = parseInt(searchParams.get("maxResults") || "20", 10);
+  const shouldShuffle = searchParams.get("shuffle") === "1";
 
   if (!query && !pageToken) {
     return NextResponse.json({ videos: [], nextPageToken: undefined });
@@ -102,6 +105,7 @@ export async function GET(req: NextRequest) {
 
     const ytRes = await fetch("https://www.youtube.com/youtubei/v1/search", {
       method: "POST",
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         "User-Agent":
@@ -148,24 +152,41 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const videos: VideoItem[] = [];
+    const collected: VideoItem[] = [];
     const seen = new Set<string>();
+    const collectLimit = shouldShuffle ? Math.max(maxResults * 2, 32) : maxResults;
 
     for (const item of contentsList) {
       if (item.videoRenderer) {
         const mapped = mapVideoRenderer(item.videoRenderer);
         if (mapped && !seen.has(mapped.id)) {
           seen.add(mapped.id);
-          videos.push(mapped);
-          if (videos.length >= maxResults) break;
+          collected.push(mapped);
+          if (collected.length >= collectLimit) break;
         }
       }
     }
 
-    return NextResponse.json({
-      videos,
-      nextPageToken: nextContinuationToken,
-    });
+    if (shouldShuffle && collected.length > 1) {
+      for (let i = collected.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [collected[i], collected[j]] = [collected[j], collected[i]];
+      }
+    }
+
+    const videos = collected.slice(0, maxResults);
+
+    return NextResponse.json(
+      {
+        videos,
+        nextPageToken: nextContinuationToken,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        },
+      }
+    );
   } catch (err: any) {
     return NextResponse.json(
       { videos: [], error: err?.message || "Search failed" },
