@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { VideoItem } from "@/types/youtube";
 import { getResolvedApiKey } from "@/lib/youtube";
 import { DEMO_VIDEOS } from "@/lib/mockData";
@@ -43,6 +43,7 @@ interface AppContextType {
   streamMode: StreamMode;
   setStreamMode: (mode: StreamMode) => void;
   queue: VideoItem[];
+  setQueue: React.Dispatch<React.SetStateAction<VideoItem[]>>;
   playTrack: (video: VideoItem, mode?: StreamMode, list?: VideoItem[]) => void;
   playNext: () => void;
   playPrevious: () => void;
@@ -76,6 +77,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentTrack, setCurrentTrack] = useState<VideoItem | null>(null);
   const [streamMode, setStreamMode] = useState<StreamMode>("music");
   const [queue, setQueue] = useState<VideoItem[]>(DEMO_VIDEOS);
+
+  const currentTrackRef = useRef<VideoItem | null>(null);
+  const queueRef = useRef<VideoItem[]>(DEMO_VIDEOS);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   useEffect(() => {
     try {
@@ -166,7 +178,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const isVideoSaved = (videoId: string) => savedVideos.some((v) => v.id === videoId);
 
-  const addToHistory = (video: VideoItem) => {
+  const addToHistory = useCallback((video: VideoItem) => {
     setWatchHistory((prev) => {
       const filtered = prev.filter((v) => v.id !== video.id);
       const next = [video, ...filtered].slice(0, 50);
@@ -175,7 +187,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {}
       return next;
     });
-  };
+  }, []);
 
   const clearHistory = () => {
     setWatchHistory([]);
@@ -199,40 +211,71 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const playTrack = (video: VideoItem, mode: StreamMode = "music", list?: VideoItem[]) => {
-    setCurrentTrack(video);
-    setStreamMode(mode);
-    if (list && list.length > 0) {
-      setQueue(list);
-    }
-    addToHistory(video);
-  };
+  const playTrack = useCallback(
+    (video: VideoItem, mode: StreamMode = "music", list?: VideoItem[]) => {
+      currentTrackRef.current = video;
+      setCurrentTrack(video);
+      setStreamMode(mode);
+      if (list && list.length > 1) {
+        const hasVideo = list.some((v) => v.id === video.id);
+        const nextQueue = hasVideo ? list : [video, ...list];
+        queueRef.current = nextQueue;
+        setQueue(nextQueue);
+      } else {
+        setQueue((prev) => {
+          const base = prev.length > 1 ? prev : DEMO_VIDEOS;
+          const filtered = base.filter((v) => v.id !== video.id);
+          const nextQueue = [video, ...filtered];
+          queueRef.current = nextQueue;
+          return nextQueue;
+        });
+      }
+      addToHistory(video);
+    },
+    [addToHistory]
+  );
 
-  const playNext = () => {
-    if (!currentTrack || queue.length === 0) return;
-    const idx = queue.findIndex((v) => v.id === currentTrack.id);
-    const nextIdx = idx >= 0 && idx + 1 < queue.length ? idx + 1 : 0;
-    const nextVideo = queue[nextIdx];
+  const playNext = useCallback(() => {
+    const activeTrack = currentTrackRef.current;
+    const activeQueue =
+      queueRef.current && queueRef.current.length > 0 ? queueRef.current : DEMO_VIDEOS;
+    if (!activeTrack || activeQueue.length === 0) return;
+
+    const idx = activeQueue.findIndex((v) => v.id === activeTrack.id);
+    const nextIdx = idx >= 0 && idx + 1 < activeQueue.length ? idx + 1 : 0;
+    let nextVideo = activeQueue[nextIdx];
+
+    if (nextVideo && nextVideo.id === activeTrack.id && activeQueue.length > 1) {
+      nextVideo = activeQueue[(nextIdx + 1) % activeQueue.length];
+    }
+
     if (nextVideo) {
+      currentTrackRef.current = nextVideo;
       setCurrentTrack(nextVideo);
       addToHistory(nextVideo);
     }
-  };
+  }, [addToHistory]);
 
-  const playPrevious = () => {
-    if (!currentTrack || queue.length === 0) return;
-    const idx = queue.findIndex((v) => v.id === currentTrack.id);
-    const prevIdx = idx > 0 ? idx - 1 : queue.length - 1;
-    const prevVideo = queue[prevIdx];
+  const playPrevious = useCallback(() => {
+    const activeTrack = currentTrackRef.current;
+    const activeQueue =
+      queueRef.current && queueRef.current.length > 0 ? queueRef.current : DEMO_VIDEOS;
+    if (!activeTrack || activeQueue.length === 0) return;
+
+    const idx = activeQueue.findIndex((v) => v.id === activeTrack.id);
+    const prevIdx = idx > 0 ? idx - 1 : activeQueue.length - 1;
+    const prevVideo = activeQueue[prevIdx];
     if (prevVideo) {
+      currentTrackRef.current = prevVideo;
       setCurrentTrack(prevVideo);
       addToHistory(prevVideo);
     }
-  };
+  }, [addToHistory]);
 
-  const closePlayer = () => {
+  const closePlayer = useCallback(() => {
+    currentTrackRef.current = null;
     setCurrentTrack(null);
-  };
+  }, []);
 
   const hasValidKeyConfigured = Boolean(getResolvedApiKey(apiKey));
 
@@ -270,6 +313,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         streamMode,
         setStreamMode,
         queue,
+        setQueue,
         playTrack,
         playNext,
         playPrevious,

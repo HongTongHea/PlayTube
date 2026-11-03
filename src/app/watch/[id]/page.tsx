@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, use } from "react";
+import React, { useEffect, useState, useRef, useCallback, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Headphones,
   Loader2,
+  SkipForward,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import {
@@ -31,7 +32,16 @@ import VideoCard from "@/components/VideoCard";
 
 export default function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: videoId } = use(params);
-  const { apiKey, toggleSaveVideo, isVideoSaved, addToHistory, playTrack, closePlayer } = useApp();
+  const {
+    apiKey,
+    toggleSaveVideo,
+    isVideoSaved,
+    addToHistory,
+    playTrack,
+    closePlayer,
+    queue,
+    setQueue,
+  } = useApp();
   const router = useRouter();
 
   const [video, setVideo] = useState<VideoItem | null>(null);
@@ -42,6 +52,209 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const [theaterMode, setTheaterMode] = useState<boolean>(false);
   const [descExpanded, setDescExpanded] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
+  const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
+  const [apiReady, setApiReady] = useState<boolean>(false);
+
+  const playerWrapperRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<any>(null);
+  const playerReadyRef = useRef<boolean>(false);
+  const currentVideoIdRef = useRef<string>(videoId);
+  const lastEndedVideoIdRef = useRef<string | null>(null);
+  const playedIdsRef = useRef<Set<string>>(new Set([videoId]));
+  const relatedVideosRef = useRef<VideoItem[]>([]);
+  const queueRef = useRef<VideoItem[]>(queue);
+  const autoPlayNextRef = useRef<boolean>(autoPlayNext);
+
+  useEffect(() => {
+    currentVideoIdRef.current = videoId;
+    playedIdsRef.current.add(videoId);
+  }, [videoId]);
+
+  useEffect(() => {
+    relatedVideosRef.current = relatedVideos;
+  }, [relatedVideos]);
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
+    autoPlayNextRef.current = autoPlayNext;
+  }, [autoPlayNext]);
+
+  const handlePlayNextVideo = useCallback(
+    (force = false) => {
+      if (!force && !autoPlayNextRef.current) return;
+
+      const activeId = currentVideoIdRef.current;
+      if (!force && lastEndedVideoIdRef.current === activeId) return;
+      lastEndedVideoIdRef.current = activeId;
+
+      const relList = relatedVideosRef.current;
+      const globalQueue = queueRef.current;
+
+      // 1. Pick the first unplayed video from Up Next (relatedVideos)
+      let nextVideo = relList.find(
+        (v) => v.id !== activeId && !playedIdsRef.current.has(v.id)
+      );
+
+      // 2. Fallback to next video in global queue
+      if (!nextVideo && globalQueue.length > 0) {
+        const idx = globalQueue.findIndex((v) => v.id === activeId);
+        if (idx >= 0 && idx + 1 < globalQueue.length) {
+          nextVideo = globalQueue[idx + 1];
+        } else {
+          nextVideo = globalQueue.find(
+            (v) => v.id !== activeId && !playedIdsRef.current.has(v.id)
+          );
+        }
+      }
+
+      // 3. Fallback to first item in relatedVideos or globalQueue
+      if (!nextVideo) {
+        playedIdsRef.current.clear();
+        playedIdsRef.current.add(activeId);
+        nextVideo =
+          relList.find((v) => v.id !== activeId) ||
+          globalQueue.find((v) => v.id !== activeId);
+      }
+
+      if (nextVideo) {
+        playedIdsRef.current.add(nextVideo.id);
+        router.push(`/watch/${nextVideo.id}`);
+      }
+    },
+    [router]
+  );
+
+  const handlePlayNextRef = useRef(handlePlayNextVideo);
+  useEffect(() => {
+    handlePlayNextRef.current = handlePlayNextVideo;
+  }, [handlePlayNextVideo]);
+
+  // Load YouTube IFrame API script
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.YT && window.YT.Player) {
+      setApiReady(true);
+      return;
+    }
+
+    const existingScript = document.getElementById("yt-iframe-api");
+    if (!existingScript) {
+      const tag = document.createElement("script");
+      tag.id = "yt-iframe-api";
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.body.appendChild(tag);
+    }
+
+    const prevCallback = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      if (prevCallback) prevCallback();
+      setApiReady(true);
+    };
+
+    const interval = setInterval(() => {
+      if (window.YT && window.YT.Player) {
+        setApiReady(true);
+        clearInterval(interval);
+      }
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Initialize or update YT Player on Watch Page
+  useEffect(() => {
+    if (!apiReady || typeof window === "undefined") return;
+
+    currentVideoIdRef.current = videoId;
+    lastEndedVideoIdRef.current = null;
+
+    if (playerRef.current) {
+      if (
+        playerReadyRef.current &&
+        typeof playerRef.current.loadVideoById === "function"
+      ) {
+        playerRef.current.loadVideoById(videoId);
+        playerRef.current.playVideo?.();
+      }
+      return;
+    }
+
+    if (!playerWrapperRef.current) return;
+    playerWrapperRef.current.innerHTML = "";
+    const mountEl = document.createElement("div");
+    mountEl.style.width = "100%";
+    mountEl.style.height = "100%";
+    playerWrapperRef.current.appendChild(mountEl);
+
+    const initialVideoId = videoId;
+    playerReadyRef.current = false;
+
+    playerRef.current = new window.YT.Player(mountEl, {
+      height: "100%",
+      width: "100%",
+      videoId: initialVideoId,
+      playerVars: {
+        autoplay: 1,
+        playsinline: 1,
+        rel: 0,
+        modestbranding: 1,
+        iv_load_policy: 3,
+        enablejsapi: 1,
+        origin: window.location.origin,
+      },
+      events: {
+        onReady: (event: any) => {
+          playerReadyRef.current = true;
+          const latestId = currentVideoIdRef.current;
+          if (latestId && latestId !== initialVideoId) {
+            event.target.loadVideoById(latestId);
+          }
+          event.target.playVideo?.();
+        },
+        onStateChange: (event: any) => {
+          const state = event.data;
+          if (state === window.YT.PlayerState.PLAYING) {
+            lastEndedVideoIdRef.current = null;
+          } else if (state === window.YT.PlayerState.CUED) {
+            event.target.playVideo?.();
+          } else if (state === window.YT.PlayerState.ENDED) {
+            handlePlayNextRef.current(false);
+          }
+        },
+      },
+    });
+  }, [videoId, apiReady]);
+
+  // Fallback polling for ENDED state on Watch Page
+  useEffect(() => {
+    if (!apiReady) return;
+    const timer = setInterval(() => {
+      if (!playerRef.current || !playerReadyRef.current) return;
+      try {
+        const state = playerRef.current.getPlayerState?.();
+        if (state === 0) {
+          handlePlayNextRef.current(false);
+        }
+      } catch {}
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [apiReady]);
+
+  // Destroy Watch Page player on unmount
+  useEffect(() => {
+    return () => {
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy?.();
+        } catch {}
+        playerRef.current = null;
+        playerReadyRef.current = false;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,8 +286,12 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           maxResults: 12,
         });
         if (!cancelled) {
-          setRelatedVideos(relatedRes.videos.filter((v) => v.id !== videoId));
+          const filteredRelated = relatedRes.videos.filter((v) => v.id !== videoId);
+          setRelatedVideos(filteredRelated);
           setRelatedPageToken(relatedRes.nextPageToken);
+          if (filteredRelated.length > 0) {
+            setQueue([detailsRes.video, ...filteredRelated]);
+          }
         }
       }
       setComments(commentsRes.comments);
@@ -84,7 +301,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     return () => {
       cancelled = true;
     };
-  }, [videoId, apiKey]);
+  }, [videoId, apiKey, addToHistory, closePlayer, setQueue]);
 
   const handleLoadMoreRelated = async () => {
     if (loadingMoreRelated || !video) return;
@@ -131,11 +348,6 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     router.push("/");
   };
 
-  // Ad-free privacy-enhanced embed URL with playsinline=1 for smooth mobile & desktop playback
-  const embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
-    videoId
-  )}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`;
-
   return (
     <div className="max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
       {/* Top Breadcrumb & Controls */}
@@ -149,6 +361,18 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         </Link>
 
         <div className="flex items-center gap-2">
+          {relatedVideos.length > 0 && (
+            <button
+              type="button"
+              onClick={() => handlePlayNextVideo(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-zinc-200/80 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
+              title="Play Next Video in Queue"
+            >
+              <SkipForward className="w-3.5 h-3.5" />
+              <span>Next Video</span>
+            </button>
+          )}
+
           {video && (
             <button
               onClick={handleContinueInMusicBar}
@@ -185,20 +409,13 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       >
         {/* Left / Main Column: Video Player + Info + Comments */}
         <div className={theaterMode ? "w-full" : "lg:col-span-2 space-y-4 sm:space-y-5"}>
-          {/* Ad-Free Video Player */}
+          {/* Ad-Free Video Player with Autoplay-Next Support */}
           <div
             className={`relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-xl ring-1 ring-zinc-200 dark:ring-zinc-800 ${
               theaterMode ? "max-h-[78vh]" : ""
             }`}
           >
-            <iframe
-              key={videoId}
-              src={embedUrl}
-              title={video?.title || "PlayTube Video Player"}
-              className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
+            <div ref={playerWrapperRef} className="w-full h-full" />
           </div>
 
           {/* Video Title & Actions */}
@@ -358,9 +575,30 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
         {/* Right Column: Up Next / Related Videos */}
         <div className="space-y-3">
-          <h2 className="text-sm font-bold text-zinc-900 dark:text-white px-2">
-            Up Next in Queue
-          </h2>
+          <div className="flex items-center justify-between px-2">
+            <h2 className="text-sm font-bold text-zinc-900 dark:text-white">
+              Up Next in Queue
+            </h2>
+            <button
+              type="button"
+              onClick={() => setAutoPlayNext(!autoPlayNext)}
+              className="inline-flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-300"
+              title="Automatically play next video when current video ends"
+            >
+              <span>Autoplay</span>
+              <span
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  autoPlayNext ? "bg-red-600" : "bg-zinc-300 dark:bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    autoPlayNext ? "translate-x-4" : "translate-x-1"
+                  }`}
+                />
+              </span>
+            </button>
+          </div>
           <div className="space-y-1.5">
             {relatedVideos.map((relVideo) => (
               <VideoCard

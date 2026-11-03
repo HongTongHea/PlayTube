@@ -35,12 +35,34 @@ export default function StreamPlayer() {
   } = useApp();
 
   const pathname = usePathname();
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
-  const containerId = "playtube-persistent-yt-player";
+  const playerReadyRef = useRef<boolean>(false);
+  const currentVideoIdRef = useRef<string | null>(null);
+  const lastEndedVideoIdRef = useRef<string | null>(null);
+
+  const playNextRef = useRef(playNext);
+  const playPreviousRef = useRef(playPrevious);
+
+  useEffect(() => {
+    playNextRef.current = playNext;
+  }, [playNext]);
+
+  useEffect(() => {
+    playPreviousRef.current = playPrevious;
+  }, [playPrevious]);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [apiReady, setApiReady] = useState<boolean>(false);
+
+  const triggerAutoNext = () => {
+    const activeId = currentVideoIdRef.current;
+    if (!activeId) return;
+    if (lastEndedVideoIdRef.current === activeId) return;
+    lastEndedVideoIdRef.current = activeId;
+    playNextRef.current();
+  };
 
   // Load YouTube IFrame API script once
   useEffect(() => {
@@ -69,7 +91,7 @@ export default function StreamPlayer() {
         setApiReady(true);
         clearInterval(interval);
       }
-    }, 300);
+    }, 250);
 
     return () => clearInterval(interval);
   }, []);
@@ -77,6 +99,9 @@ export default function StreamPlayer() {
   // Initialize or update YT player when currentTrack changes
   useEffect(() => {
     if (!currentTrack || !apiReady || typeof window === "undefined") return;
+
+    currentVideoIdRef.current = currentTrack.id;
+    lastEndedVideoIdRef.current = null;
 
     // Update OS / Mobile Lock-Screen MediaSession metadata
     if ("mediaSession" in navigator) {
@@ -103,59 +128,113 @@ export default function StreamPlayer() {
           setIsPlaying(false);
         });
         navigator.mediaSession.setActionHandler("previoustrack", () => {
-          playPrevious();
+          playPreviousRef.current();
         });
         navigator.mediaSession.setActionHandler("nexttrack", () => {
-          playNext();
+          playNextRef.current();
         });
       } catch {
         // Ignore unsupported mediaSession handlers
       }
     }
 
-    if (playerRef.current && typeof playerRef.current.loadVideoById === "function") {
-      playerRef.current.loadVideoById(currentTrack.id);
-      setIsPlaying(true);
+    // If player already exists, load the new track without re-creating the instance
+    if (playerRef.current) {
+      if (
+        playerReadyRef.current &&
+        typeof playerRef.current.loadVideoById === "function"
+      ) {
+        playerRef.current.loadVideoById(currentTrack.id);
+        playerRef.current.playVideo?.();
+        setIsPlaying(true);
+      }
       return;
     }
 
-    playerRef.current = new window.YT.Player(containerId, {
+    if (!wrapperRef.current) return;
+    wrapperRef.current.innerHTML = "";
+    const mountEl = document.createElement("div");
+    mountEl.style.width = "100%";
+    mountEl.style.height = "100%";
+    wrapperRef.current.appendChild(mountEl);
+
+    const initialVideoId = currentTrack.id;
+    playerReadyRef.current = false;
+
+    playerRef.current = new window.YT.Player(mountEl, {
       height: "100%",
       width: "100%",
-      videoId: currentTrack.id,
-      host: "https://www.youtube-nocookie.com",
+      videoId: initialVideoId,
       playerVars: {
         autoplay: 1,
         playsinline: 1,
         rel: 0,
         modestbranding: 1,
         iv_load_policy: 3,
+        enablejsapi: 1,
+        origin: window.location.origin,
       },
       events: {
         onReady: (event: any) => {
-          event.target.playVideo();
+          playerReadyRef.current = true;
+          const latestId = currentVideoIdRef.current;
+          if (latestId && latestId !== initialVideoId) {
+            event.target.loadVideoById(latestId);
+          }
+          event.target.playVideo?.();
           setIsPlaying(true);
         },
         onStateChange: (event: any) => {
-          if (event.data === window.YT.PlayerState.PLAYING) {
+          const state = event.data;
+          if (state === window.YT.PlayerState.PLAYING) {
+            lastEndedVideoIdRef.current = null;
             setIsPlaying(true);
-          } else if (event.data === window.YT.PlayerState.PAUSED) {
+          } else if (state === window.YT.PlayerState.PAUSED) {
             setIsPlaying(false);
-          } else if (event.data === window.YT.PlayerState.ENDED) {
-            playNext();
+          } else if (state === window.YT.PlayerState.CUED) {
+            event.target.playVideo?.();
+            setIsPlaying(true);
+          } else if (state === window.YT.PlayerState.ENDED) {
+            triggerAutoNext();
           }
+        },
+        onError: () => {
+          setTimeout(() => {
+            triggerAutoNext();
+          }, 800);
         },
       },
     });
+  }, [currentTrack, apiReady]);
+
+  // Fallback polling for ENDED state (handles background tab throttling on mobile/desktop)
+  useEffect(() => {
+    if (!currentTrack || !apiReady) return;
+    const timer = setInterval(() => {
+      if (!playerRef.current || !playerReadyRef.current) return;
+      try {
+        const state = playerRef.current.getPlayerState?.();
+        if (state === 0) {
+          triggerAutoNext();
+        }
+      } catch {}
+    }, 1000);
+    return () => clearInterval(timer);
   }, [currentTrack, apiReady]);
 
   // Cleanup player when closed
   useEffect(() => {
     if (!currentTrack && playerRef.current) {
       try {
-        playerRef.current.destroy();
+        playerRef.current.destroy?.();
       } catch {}
       playerRef.current = null;
+      playerReadyRef.current = false;
+      currentVideoIdRef.current = null;
+      lastEndedVideoIdRef.current = null;
+      if (wrapperRef.current) {
+        wrapperRef.current.innerHTML = "";
+      }
     }
   }, [currentTrack]);
 
@@ -188,15 +267,15 @@ export default function StreamPlayer() {
 
   return (
     <>
-      {/* Floating Video Preview Window (Visible in Video Mode, hidden in Music Mode but kept in DOM so audio plays continuously on mobile & desktop) */}
+      {/* Floating Video Preview Window (Visible in Video Mode, hidden in Music Mode but kept in DOM at >=200x200 so audio & next-track autoplay work continuously on mobile & desktop) */}
       <div
-        className={`fixed z-50 transition-all duration-300 overflow-hidden shadow-2xl border border-zinc-700/80 bg-black ${
+        className={`fixed transition-all duration-300 overflow-hidden shadow-2xl border border-zinc-700/80 bg-black ${
           streamMode === "video" && !isOnSameWatchPage
-            ? "bottom-32 md:bottom-24 right-3 sm:right-6 w-64 sm:w-80 aspect-video rounded-2xl opacity-100 pointer-events-auto"
-            : "bottom-0 right-0 w-1 h-1 opacity-0 pointer-events-none"
+            ? "z-50 bottom-32 md:bottom-24 right-3 sm:right-6 w-64 sm:w-80 aspect-video rounded-2xl opacity-100 pointer-events-auto"
+            : "-z-10 bottom-0 right-0 w-[200px] h-[200px] opacity-[0.001] pointer-events-none"
         }`}
       >
-        <div id={containerId} className="w-full h-full" />
+        <div ref={wrapperRef} className="w-full h-full" />
       </div>
 
       {/* Bottom Music & Video Streaming Control Dock */}
