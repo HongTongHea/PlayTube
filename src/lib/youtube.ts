@@ -210,29 +210,57 @@ export async function fetchPopularVideos(options: {
   const maxResults = options.maxResults || 16;
   const shouldShuffle = options.shuffle !== false;
 
-  // When loading discovery feeds (Home, Trending, or Category tabs) without a continuation token,
-  // pick 2 rotating discovery queries in parallel and shuffle the combined pool so every page refresh
-  // loads fresh videos & songs!
-  if (!options.pageToken && options.categoryKey) {
-    const pickedQueries = pickRandomDiscoveryQueries(options.categoryKey, 2);
+  // When loading discovery feeds (Home, Trending, or Category tabs),
+  // both initial load and infinite-scroll pagination fetch fresh discovery queries
+  // (plus continuation token if provided) so scrolling down always loads new videos & songs!
+  if (options.categoryKey) {
     try {
-      const results = await Promise.all(
-        pickedQueries.map((q) =>
-          searchYouTubeVideos(q, key, Math.ceil(maxResults * 0.8), undefined, true)
-        )
-      );
       const merged: VideoItem[] = [];
       const seen = new Set<string>();
       let token: string | undefined = undefined;
 
-      for (const res of results) {
-        if (!token && res.nextPageToken) {
-          token = res.nextPageToken;
+      // If a valid InnerTube continuation pageToken was provided, fetch its continuation first
+      if (
+        options.pageToken &&
+        !options.pageToken.startsWith("demo_") &&
+        !options.pageToken.startsWith("discover_")
+      ) {
+        const contRes = await searchYouTubeVideos(
+          options.query || "",
+          key,
+          maxResults,
+          options.pageToken,
+          false
+        );
+        if (contRes.nextPageToken) {
+          token = contRes.nextPageToken;
         }
-        for (const v of res.videos) {
+        for (const v of contRes.videos) {
           if (!seen.has(v.id)) {
             seen.add(v.id);
             merged.push(v);
+          }
+        }
+      }
+
+      // Also fetch rotating discovery queries when initial loading or when more variety is needed
+      if (merged.length < maxResults) {
+        const pickedQueries = pickRandomDiscoveryQueries(options.categoryKey, 2);
+        const results = await Promise.all(
+          pickedQueries.map((q) =>
+            searchYouTubeVideos(q, key, Math.ceil(maxResults * 0.8), undefined, true)
+          )
+        );
+
+        for (const res of results) {
+          if (!token && res.nextPageToken) {
+            token = res.nextPageToken;
+          }
+          for (const v of res.videos) {
+            if (!seen.has(v.id)) {
+              seen.add(v.id);
+              merged.push(v);
+            }
           }
         }
       }
@@ -243,19 +271,24 @@ export async function fetchPopularVideos(options: {
           : merged.slice(0, maxResults);
         return {
           videos: finalVideos,
-          nextPageToken: token,
+          nextPageToken: token || `discover_${Date.now()}`,
           isDemo: false,
         };
       }
     } catch {
-      // Fallback below if parallel discovery fails
+      // Fallback below if discovery fails
     }
   }
 
-  // If a search query is provided (either search bar or topic query), use searchYouTubeVideos (powered by /api/search)
-  if (options.query && options.query.trim()) {
+  // If a search query or InnerTube continuation pageToken is provided, use searchYouTubeVideos (powered by /api/search)
+  if (
+    (options.query && options.query.trim()) ||
+    (options.pageToken &&
+      !options.pageToken.startsWith("demo_") &&
+      options.pageToken.length > 16)
+  ) {
     return await searchYouTubeVideos(
-      options.query.trim(),
+      (options.query || "").trim(),
       key,
       maxResults,
       options.pageToken,

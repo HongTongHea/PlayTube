@@ -116,7 +116,7 @@ export default function HomePage() {
 
         if (!cancelled && res) {
           setVideos(res.videos);
-          setNextPageToken(res.nextPageToken);
+          setNextPageToken(res.nextPageToken || "discover_more");
           if (!currentTrackRef.current && res.videos.length > 0) {
             setQueue(res.videos);
           }
@@ -134,21 +134,31 @@ export default function HomePage() {
     };
   }, [apiKey, activeSection, activeCategory, searchQuery, refreshSeed, setQueue]);
 
+  const loadingMoreRef = useRef<boolean>(false);
+
   // Load more videos when scrolling down (Infinite Scroll)
   const loadMoreVideos = useCallback(async () => {
     if (
       loading ||
       loadingMore ||
-      !nextPageToken ||
+      loadingMoreRef.current ||
       activeSection === "saved" ||
       activeSection === "history"
     ) {
       return;
     }
 
+    // For explicit search queries, stop only if there is no continuation token
+    if (searchQuery.trim() && !nextPageToken) {
+      return;
+    }
+
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       let res;
+      const selectedCat = CATEGORIES.find((c) => c.id === activeCategory);
+
       if (searchQuery.trim()) {
         res = await searchYouTubeVideos(searchQuery.trim(), apiKey, 12, nextPageToken);
       } else if (activeSection === "trending") {
@@ -156,31 +166,60 @@ export default function HomePage() {
           apiKey,
           categoryKey: "trending",
           maxResults: 12,
-          pageToken: nextPageToken,
+          pageToken: nextPageToken || "discover_more",
         });
       } else {
-        const selectedCat = CATEGORIES.find((c) => c.id === activeCategory);
         res = await fetchPopularVideos({
           apiKey,
           categoryKey: selectedCat?.id || "all",
           categoryId: selectedCat?.categoryId,
           query: selectedCat?.query,
           maxResults: 12,
-          pageToken: nextPageToken,
+          pageToken: nextPageToken || "discover_more",
         });
       }
 
-      if (res && res.videos.length > 0) {
-        setVideos((prev) => {
-          const existingIds = new Set(prev.map((v) => v.id));
-          const uniqueNew = res.videos.filter((v) => !existingIds.has(v.id));
-          return [...prev, ...uniqueNew];
+      const existingIds = new Set(videos.map((v) => v.id));
+      let uniqueNew = (res?.videos || []).filter((v) => !existingIds.has(v.id));
+
+      // If continuation overlapped with already displayed videos on a discovery feed,
+      // immediately pull a fresh discovery batch so scrolling down always adds new videos!
+      if (uniqueNew.length < 4 && !searchQuery.trim()) {
+        const fallbackPoolKey =
+          activeSection === "trending" ? "trending" : selectedCat?.id || "all";
+        const freshRes = await fetchPopularVideos({
+          apiKey,
+          categoryKey: fallbackPoolKey,
+          maxResults: 16,
+          pageToken: "discover_more",
+          shuffle: true,
         });
-        setNextPageToken(res.nextPageToken);
+        for (const v of freshRes.videos) {
+          if (!existingIds.has(v.id) && !uniqueNew.some((u) => u.id === v.id)) {
+            uniqueNew.push(v);
+          }
+        }
+        if (freshRes.nextPageToken) {
+          res = freshRes;
+        }
+      }
+
+      if (uniqueNew.length > 0) {
+        setVideos((prev) => {
+          const prevIds = new Set(prev.map((v) => v.id));
+          const filtered = uniqueNew.filter((v) => !prevIds.has(v.id));
+          return [...prev, ...filtered];
+        });
+        setNextPageToken(
+          res?.nextPageToken || (searchQuery.trim() ? undefined : `discover_${Date.now()}`)
+        );
+      } else if (!searchQuery.trim()) {
+        setNextPageToken(`discover_${Date.now()}`);
       } else {
         setNextPageToken(undefined);
       }
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
   }, [
@@ -191,9 +230,10 @@ export default function HomePage() {
     searchQuery,
     apiKey,
     activeCategory,
+    videos,
   ]);
 
-  // IntersectionObserver for smooth Infinite Scroll on mobile and desktop
+  // IntersectionObserver + Window Scroll listener for smooth Infinite Scroll on mobile and desktop
   useEffect(() => {
     const target = observerTarget.current;
     if (!target) return;
@@ -204,12 +244,28 @@ export default function HomePage() {
           loadMoreVideos();
         }
       },
-      { rootMargin: "350px" }
+      { rootMargin: "600px" }
     );
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [loadMoreVideos]);
+  }, [loadMoreVideos, videos.length, loading]);
+
+  useEffect(() => {
+    if (activeSection === "saved" || activeSection === "history" || loading) return;
+
+    const handleScroll = () => {
+      if (loadingMoreRef.current) return;
+      const scrollPosition = window.innerHeight + window.scrollY;
+      const threshold = document.documentElement.scrollHeight - 700;
+      if (scrollPosition >= threshold) {
+        loadMoreVideos();
+      }
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [activeSection, loading, loadMoreVideos]);
 
   const displayedVideos =
     activeSection === "saved"
