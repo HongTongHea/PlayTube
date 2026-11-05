@@ -318,10 +318,11 @@ export default function HomePage() {
             {displayedVideos.length > 0 && (
               <button
                 onClick={() => playTrack(displayedVideos[0], "music", displayedVideos)}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 shrink-0 transition-opacity"
+                className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-full text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 shrink-0 transition-opacity"
+                title="Stream all tracks with mobile lock-screen playback"
               >
                 <Headphones className="w-3.5 h-3.5 text-red-500" />
-                Stream All
+                <span>Stream All</span>
               </button>
             )}
           </div>

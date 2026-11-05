@@ -17,6 +17,10 @@ import {
   Headphones,
   Loader2,
   SkipForward,
+  Play,
+  Pause,
+  Smartphone,
+  Tv,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import {
@@ -31,13 +35,28 @@ import { VideoItem, CommentItem } from "@/types/youtube";
 import VideoCard from "@/components/VideoCard";
 import {
   installMobileBackgroundSupport,
+  isPageActuallyHidden,
+  pauseDummyKeepAliveAudio,
   startBackgroundAudioKeepAlive,
   stopBackgroundAudioKeepAlive,
+  unlockAudioElementOnGesture,
   updateLockScreenMediaSession,
   updateMediaSessionPlaybackState,
   updateMediaSessionPosition,
   wasRecentlyBackgrounded,
 } from "@/lib/backgroundAudio";
+
+function formatClock(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "0:00";
+  const total = Math.floor(sec);
+  const hrs = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hrs > 0) {
+    return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
 
 export default function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: videoId } = use(params);
@@ -64,6 +83,14 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
   const [apiReady, setApiReady] = useState<boolean>(false);
 
+  // Lock-Screen Native Audio Mode state on WatchPage
+  const [lockScreenAudioMode, setLockScreenAudioMode] = useState<boolean>(false);
+  const [audioFallbackToYt, setAudioFallbackToYt] = useState<boolean>(false);
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+
+  const watchAudioRef = useRef<HTMLAudioElement | null>(null);
   const playerWrapperRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
   const playerReadyRef = useRef<boolean>(false);
@@ -74,12 +101,46 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const relatedVideosRef = useRef<VideoItem[]>([]);
   const queueRef = useRef<VideoItem[]>(queue);
   const autoPlayNextRef = useRef<boolean>(autoPlayNext);
+  const lockScreenAudioModeRef = useRef<boolean>(lockScreenAudioMode);
+  const autoHandoffActiveRef = useRef<boolean>(false);
+  const audioFallbackToYtRef = useRef<boolean>(audioFallbackToYt);
+  const currentTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    return unlockAudioElementOnGesture(watchAudioRef.current);
+  }, []);
+
+  useEffect(() => {
+    lockScreenAudioModeRef.current = lockScreenAudioMode;
+  }, [lockScreenAudioMode]);
+
+  useEffect(() => {
+    audioFallbackToYtRef.current = audioFallbackToYt;
+  }, [audioFallbackToYt]);
 
   useEffect(() => {
     currentVideoIdRef.current = videoId;
     playedIdsRef.current.add(videoId);
     userIntendedPlayRef.current = true;
-    startBackgroundAudioKeepAlive();
+    setAudioFallbackToYt(false);
+    audioFallbackToYtRef.current = false;
+    currentTimeRef.current = 0;
+    setCurrentTime(0);
+    setDuration(0);
+
+    if (watchAudioRef.current) {
+      const targetSrc = `/api/audio?id=${videoId}`;
+      if (!watchAudioRef.current.src.includes(targetSrc)) {
+        watchAudioRef.current.src = targetSrc;
+        watchAudioRef.current.load();
+      }
+      if (lockScreenAudioModeRef.current || isPageActuallyHidden()) {
+        autoHandoffActiveRef.current = isPageActuallyHidden() && !lockScreenAudioModeRef.current;
+        pauseDummyKeepAliveAudio();
+        watchAudioRef.current.play().catch(() => {});
+        setIsPlaying(true);
+      }
+    }
   }, [videoId]);
 
   useEffect(() => {
@@ -94,30 +155,165 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     autoPlayNextRef.current = autoPlayNext;
   }, [autoPlayNext]);
 
-  const forceResumeWatchPlayback = useCallback(() => {
-    if (!userIntendedPlayRef.current) return;
-    startBackgroundAudioKeepAlive();
-    updateMediaSessionPlaybackState(true);
-    const delays = [0, 120, 350, 800, 1600, 2800];
-    delays.forEach((ms) => {
-      setTimeout(() => {
-        if (!userIntendedPlayRef.current || !playerRef.current) return;
-        try {
-          playerRef.current.playVideo?.();
-          startBackgroundAudioKeepAlive();
-          updateMediaSessionPlaybackState(true);
-        } catch {}
-      }, ms);
-    });
+  const isNativeAudioActive = useCallback(() => {
+    if (audioFallbackToYtRef.current) return false;
+    return lockScreenAudioModeRef.current || autoHandoffActiveRef.current;
   }, []);
 
-  useEffect(() => {
-    return installMobileBackgroundSupport(() => {
-      if (userIntendedPlayRef.current) {
-        forceResumeWatchPlayback();
+  const seekWatchTo = useCallback(
+    (seconds: number) => {
+      const target = Math.max(0, seconds);
+      currentTimeRef.current = target;
+      setCurrentTime(target);
+      if (isNativeAudioActive() && watchAudioRef.current) {
+        try {
+          watchAudioRef.current.currentTime = target;
+        } catch {}
+      } else if (playerRef.current) {
+        try {
+          playerRef.current.seekTo?.(target, true);
+        } catch {}
       }
-    });
-  }, [forceResumeWatchPlayback]);
+    },
+    [isNativeAudioActive]
+  );
+
+  // Automatic Lock-Screen Audio Handoff when user locks mobile phone screen while on WatchPage
+  useEffect(() => {
+    return installMobileBackgroundSupport(
+      () => {
+        // Screen locked or browser minimized
+        if (!userIntendedPlayRef.current) return;
+
+        if (!audioFallbackToYtRef.current && watchAudioRef.current) {
+          if (!lockScreenAudioModeRef.current && !autoHandoffActiveRef.current) {
+            autoHandoffActiveRef.current = true;
+            const ytTime =
+              playerRef.current?.getCurrentTime?.() || currentTimeRef.current || 0;
+            try {
+              playerRef.current?.pauseVideo?.();
+            } catch {}
+            const expectedSrc = `/api/audio?id=${currentVideoIdRef.current}`;
+            if (!watchAudioRef.current.src.includes(expectedSrc)) {
+              watchAudioRef.current.src = expectedSrc;
+            }
+            try {
+              if (ytTime > 0) {
+                watchAudioRef.current.currentTime = ytTime;
+              }
+            } catch {}
+          }
+          pauseDummyKeepAliveAudio();
+          watchAudioRef.current.play().catch(() => {});
+          updateMediaSessionPlaybackState(true);
+          setIsPlaying(true);
+        } else if (playerRef.current) {
+          startBackgroundAudioKeepAlive(true);
+          const delays = [0, 150, 400, 900, 1800];
+          delays.forEach((ms) => {
+            setTimeout(() => {
+              if (!userIntendedPlayRef.current || !playerRef.current) return;
+              try {
+                playerRef.current.playVideo?.();
+                updateMediaSessionPlaybackState(true);
+              } catch {}
+            }, ms);
+          });
+        }
+      },
+      () => {
+        // Screen unlocked / returned to foreground
+        if (
+          autoHandoffActiveRef.current &&
+          !lockScreenAudioModeRef.current &&
+          !audioFallbackToYtRef.current
+        ) {
+          autoHandoffActiveRef.current = false;
+          const audioTime =
+            watchAudioRef.current?.currentTime || currentTimeRef.current || 0;
+          try {
+            watchAudioRef.current?.pause();
+          } catch {}
+          if (playerRef.current && userIntendedPlayRef.current) {
+            try {
+              playerRef.current.seekTo?.(audioTime, true);
+              playerRef.current.playVideo?.();
+            } catch {}
+          }
+        }
+      }
+    );
+  }, []);
+
+  // Synchronize switching Lock-Screen Audio Mode ON/OFF manually on WatchPage
+  const toggleLockScreenAudioMode = () => {
+    const nextMode = !lockScreenAudioMode;
+    setLockScreenAudioMode(nextMode);
+    lockScreenAudioModeRef.current = nextMode;
+    autoHandoffActiveRef.current = false;
+
+    if (nextMode && !audioFallbackToYtRef.current && watchAudioRef.current) {
+      const ytTime =
+        playerRef.current?.getCurrentTime?.() || currentTimeRef.current || 0;
+      try {
+        playerRef.current?.pauseVideo?.();
+      } catch {}
+      const expectedSrc = `/api/audio?id=${currentVideoIdRef.current}`;
+      if (!watchAudioRef.current.src.includes(expectedSrc)) {
+        watchAudioRef.current.src = expectedSrc;
+      }
+      if (ytTime > 1) {
+        try {
+          watchAudioRef.current.currentTime = ytTime;
+        } catch {}
+      }
+      userIntendedPlayRef.current = true;
+      pauseDummyKeepAliveAudio();
+      watchAudioRef.current.play().catch(() => {});
+      setIsPlaying(true);
+      updateMediaSessionPlaybackState(true);
+    } else {
+      const audioTime =
+        watchAudioRef.current?.currentTime || currentTimeRef.current || 0;
+      try {
+        watchAudioRef.current?.pause();
+      } catch {}
+      if (playerRef.current) {
+        try {
+          if (audioTime > 1) {
+            playerRef.current.seekTo?.(audioTime, true);
+          }
+          if (userIntendedPlayRef.current) {
+            playerRef.current.playVideo?.();
+            setIsPlaying(true);
+          }
+        } catch {}
+      }
+    }
+  };
+
+  const toggleWatchPlayPause = () => {
+    if (isPlaying) {
+      userIntendedPlayRef.current = false;
+      stopBackgroundAudioKeepAlive();
+      watchAudioRef.current?.pause();
+      try {
+        playerRef.current?.pauseVideo?.();
+      } catch {}
+      setIsPlaying(false);
+      updateMediaSessionPlaybackState(false);
+    } else {
+      userIntendedPlayRef.current = true;
+      if (isNativeAudioActive() && watchAudioRef.current) {
+        pauseDummyKeepAliveAudio();
+        watchAudioRef.current.play().catch(() => {});
+      } else {
+        playerRef.current?.playVideo?.();
+      }
+      setIsPlaying(true);
+      updateMediaSessionPlaybackState(true);
+    }
+  };
 
   const handlePlayNextVideo = useCallback(
     (force = false) => {
@@ -158,8 +354,17 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
       if (nextVideo) {
         playedIdsRef.current.add(nextVideo.id);
+        currentVideoIdRef.current = nextVideo.id;
         userIntendedPlayRef.current = true;
-        startBackgroundAudioKeepAlive();
+
+        // If native audio is active (or screen is locked), immediately load & play on the same <audio> element!
+        if (
+          watchAudioRef.current &&
+          (lockScreenAudioModeRef.current || autoHandoffActiveRef.current || isPageActuallyHidden())
+        ) {
+          watchAudioRef.current.src = `/api/audio?id=${nextVideo.id}`;
+          watchAudioRef.current.play().catch(() => {});
+        }
         router.push(`/watch/${nextVideo.id}`);
       }
     },
@@ -179,28 +384,39 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       {
         onPlay: () => {
           userIntendedPlayRef.current = true;
-          startBackgroundAudioKeepAlive();
-          playerRef.current?.playVideo?.();
+          if (isNativeAudioActive() && watchAudioRef.current) {
+            pauseDummyKeepAliveAudio();
+            watchAudioRef.current.play().catch(() => {});
+          } else {
+            playerRef.current?.playVideo?.();
+          }
+          setIsPlaying(true);
           updateMediaSessionPlaybackState(true);
         },
         onPause: () => {
           userIntendedPlayRef.current = false;
           stopBackgroundAudioKeepAlive();
-          playerRef.current?.pauseVideo?.();
+          watchAudioRef.current?.pause();
+          try {
+            playerRef.current?.pauseVideo?.();
+          } catch {}
+          setIsPlaying(false);
           updateMediaSessionPlaybackState(false);
         },
         onNext: () => {
           userIntendedPlayRef.current = true;
-          startBackgroundAudioKeepAlive();
           handlePlayNextRef.current(true);
         },
         onSeekTo: (seconds: number) => {
-          playerRef.current?.seekTo?.(seconds, true);
+          seekWatchTo(seconds);
+        },
+        onSeekOffset: (delta: number) => {
+          seekWatchTo((currentTimeRef.current || 0) + delta);
         },
       },
       true
     );
-  }, [video]);
+  }, [video, isNativeAudioActive, seekWatchTo]);
 
   // Load YouTube IFrame API script
   useEffect(() => {
@@ -248,8 +464,11 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         typeof playerRef.current.loadVideoById === "function"
       ) {
         playerRef.current.loadVideoById(videoId);
-        playerRef.current.playVideo?.();
-        startBackgroundAudioKeepAlive();
+        if (isNativeAudioActive()) {
+          playerRef.current.pauseVideo?.();
+        } else {
+          playerRef.current.playVideo?.();
+        }
       }
       return;
     }
@@ -284,33 +503,44 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           if (latestId && latestId !== initialVideoId) {
             event.target.loadVideoById(latestId);
           }
-          event.target.playVideo?.();
-          startBackgroundAudioKeepAlive();
-          updateMediaSessionPlaybackState(true);
+          if (isNativeAudioActive()) {
+            event.target.pauseVideo?.();
+          } else {
+            event.target.playVideo?.();
+            setIsPlaying(true);
+            updateMediaSessionPlaybackState(true);
+          }
         },
         onStateChange: (event: any) => {
+          if (isNativeAudioActive()) return;
           const state = event.data;
           if (state === window.YT.PlayerState.PLAYING) {
             lastEndedVideoIdRef.current = null;
             userIntendedPlayRef.current = true;
-            startBackgroundAudioKeepAlive();
+            setIsPlaying(true);
             updateMediaSessionPlaybackState(true);
           } else if (state === window.YT.PlayerState.PAUSED) {
-            // If paused because mobile screen just locked or tab backgrounded, auto-resume!
             if (userIntendedPlayRef.current && wasRecentlyBackgrounded(4500)) {
-              try {
-                event.target.playVideo?.();
-              } catch {}
-              forceResumeWatchPlayback();
+              // Hand off to native audio if not already handed off
+              if (!audioFallbackToYtRef.current && watchAudioRef.current) {
+                autoHandoffActiveRef.current = true;
+                const ytTime =
+                  event.target.getCurrentTime?.() || currentTimeRef.current || 0;
+                try {
+                  if (ytTime > 0) watchAudioRef.current.currentTime = ytTime;
+                } catch {}
+                watchAudioRef.current.play().catch(() => {});
+              } else {
+                try {
+                  event.target.playVideo?.();
+                } catch {}
+              }
+              setIsPlaying(true);
             } else {
               userIntendedPlayRef.current = false;
+              setIsPlaying(false);
               stopBackgroundAudioKeepAlive();
               updateMediaSessionPlaybackState(false);
-            }
-          } else if (state === window.YT.PlayerState.CUED) {
-            if (userIntendedPlayRef.current) {
-              event.target.playVideo?.();
-              startBackgroundAudioKeepAlive();
             }
           } else if (state === window.YT.PlayerState.ENDED) {
             handlePlayNextRef.current(false);
@@ -318,38 +548,39 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         },
       },
     });
-  }, [videoId, apiReady, forceResumeWatchPlayback]);
+  }, [videoId, apiReady, isNativeAudioActive]);
 
-  // Polling for ENDED state, lock-screen auto-resume, and MediaSession position on Watch Page
+  // Polling for ENDED state and MediaSession position on Watch Page when YT Player is active
   useEffect(() => {
     if (!apiReady) return;
     const timer = setInterval(() => {
+      if (isNativeAudioActive()) return;
       if (!playerRef.current || !playerReadyRef.current) return;
       try {
         const state = playerRef.current.getPlayerState?.();
         if (state === 0) {
           handlePlayNextRef.current(false);
-        } else if (
-          state === 2 &&
-          userIntendedPlayRef.current &&
-          wasRecentlyBackgrounded(5000)
-        ) {
-          playerRef.current.playVideo?.();
-          startBackgroundAudioKeepAlive();
-          updateMediaSessionPlaybackState(true);
         } else if (state === 1) {
-          const duration = playerRef.current.getDuration?.() ?? 0;
-          const currentTime = playerRef.current.getCurrentTime?.() ?? 0;
-          updateMediaSessionPosition(duration, currentTime);
+          const dur = playerRef.current.getDuration?.() ?? 0;
+          const cur = playerRef.current.getCurrentTime?.() ?? 0;
+          currentTimeRef.current = cur;
+          setCurrentTime(cur);
+          if (dur > 0) setDuration(dur);
+          updateMediaSessionPosition(dur, cur);
         }
       } catch {}
     }, 1000);
     return () => clearInterval(timer);
-  }, [apiReady]);
+  }, [apiReady, isNativeAudioActive]);
 
   // Destroy Watch Page player on unmount
   useEffect(() => {
     return () => {
+      if (watchAudioRef.current) {
+        try {
+          watchAudioRef.current.pause();
+        } catch {}
+      }
       if (playerRef.current) {
         try {
           playerRef.current.destroy?.();
@@ -454,8 +685,68 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <div className="max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
+      {/* Persistent Native <audio> Element on WatchPage for Mobile Lock-Screen Playback */}
+      <audio
+        ref={watchAudioRef}
+        playsInline
+        preload="auto"
+        className="hidden"
+        onPlay={() => {
+          if (!isNativeAudioActive()) return;
+          setIsPlaying(true);
+          pauseDummyKeepAliveAudio();
+          updateMediaSessionPlaybackState(true);
+        }}
+        onPause={() => {
+          if (!isNativeAudioActive()) return;
+          if (
+            userIntendedPlayRef.current &&
+            !watchAudioRef.current?.ended &&
+            wasRecentlyBackgrounded(2500)
+          ) {
+            watchAudioRef.current?.play().catch(() => {});
+            return;
+          }
+          if (!userIntendedPlayRef.current) {
+            setIsPlaying(false);
+            updateMediaSessionPlaybackState(false);
+          }
+        }}
+        onTimeUpdate={(e) => {
+          if (!isNativeAudioActive()) return;
+          const el = e.currentTarget;
+          const cur = el.currentTime || 0;
+          const dur = Number.isFinite(el.duration) ? el.duration : 0;
+          currentTimeRef.current = cur;
+          setCurrentTime(cur);
+          if (dur > 0) {
+            setDuration(dur);
+            updateMediaSessionPosition(dur, cur);
+          }
+        }}
+        onLoadedMetadata={(e) => {
+          const dur = e.currentTarget.duration;
+          if (Number.isFinite(dur) && dur > 0) {
+            setDuration(dur);
+          }
+        }}
+        onEnded={() => {
+          if (!isNativeAudioActive()) return;
+          handlePlayNextRef.current(false);
+        }}
+        onError={() => {
+          setAudioFallbackToYt(true);
+          audioFallbackToYtRef.current = true;
+          if (lockScreenAudioModeRef.current) {
+            setLockScreenAudioMode(false);
+            lockScreenAudioModeRef.current = false;
+            playerRef.current?.playVideo?.();
+          }
+        }}
+      />
+
       {/* Top Breadcrumb & Controls */}
-      <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 sm:mb-4">
         <Link
           href="/"
           className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
@@ -464,7 +755,32 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           Back to Feed
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {!audioFallbackToYt && (
+            <button
+              type="button"
+              onClick={toggleLockScreenAudioMode}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                lockScreenAudioMode
+                  ? "bg-emerald-600 text-white shadow-sm shadow-emerald-600/30"
+                  : "bg-zinc-200/80 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700"
+              }`}
+              title="Play as Native Audio so you can lock your mobile screen without stopping the music"
+            >
+              {lockScreenAudioMode ? (
+                <>
+                  <Tv className="w-3.5 h-3.5" />
+                  <span>Switch to Video</span>
+                </>
+              ) : (
+                <>
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Lock-Screen Audio</span>
+                </>
+              )}
+            </button>
+          )}
+
           {relatedVideos.length > 0 && (
             <button
               type="button"
@@ -473,7 +789,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               title="Play Next Video in Queue"
             >
               <SkipForward className="w-3.5 h-3.5" />
-              <span>Next Video</span>
+              <span>Next</span>
             </button>
           )}
 
@@ -484,7 +800,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               title="Minimize into the persistent Music Stream bar and keep browsing"
             >
               <Headphones className="w-3.5 h-3.5" />
-              <span>Background Music Mode</span>
+              <span>Mini Music Bar</span>
             </button>
           )}
 
@@ -513,13 +829,83 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       >
         {/* Left / Main Column: Video Player + Info + Comments */}
         <div className={theaterMode ? "w-full" : "lg:col-span-2 space-y-4 sm:space-y-5"}>
-          {/* Ad-Free Video Player with Autoplay-Next Support */}
+          {/* Ad-Free Video Player + Lock-Screen Audio Mode Overlay */}
           <div
             className={`relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-xl ring-1 ring-zinc-200 dark:ring-zinc-800 ${
               theaterMode ? "max-h-[78vh]" : ""
             }`}
           >
             <div ref={playerWrapperRef} className="w-full h-full" />
+
+            {/* Lock-Screen Audio Mode Visualizer Overlay */}
+            {lockScreenAudioMode && video && (
+              <div className="absolute inset-0 z-20 bg-zinc-950/95 backdrop-blur-xl flex flex-col items-center justify-between p-4 sm:p-8 text-white">
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Mobile Lock-Screen Audio Active — Safe to Lock Phone</span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 my-auto max-w-xl w-full">
+                  <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-2xl overflow-hidden shadow-2xl ring-2 ring-red-500/40 shrink-0">
+                    <img
+                      src={video.thumbnailUrl}
+                      alt={video.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="text-center sm:text-left min-w-0 flex-1 space-y-1.5">
+                    <h2 className="text-sm sm:text-lg font-bold line-clamp-2">
+                      {video.title}
+                    </h2>
+                    <p className="text-xs sm:text-sm text-zinc-400">
+                      {video.channelTitle}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="w-full max-w-xl space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs tabular-nums text-zinc-400 w-10 text-right">
+                      {formatClock(currentTime)}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration > 0 ? duration : 100}
+                      step={0.5}
+                      value={duration > 0 ? Math.min(currentTime, duration) : 0}
+                      onChange={(e) => seekWatchTo(parseFloat(e.target.value))}
+                      className="flex-1 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-red-600"
+                    />
+                    <span className="text-xs tabular-nums text-zinc-400 w-10">
+                      {duration > 0 ? formatClock(duration) : "--:--"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-4">
+                    <button
+                      type="button"
+                      onClick={toggleWatchPlayPause}
+                      className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/30 transition-transform active:scale-95"
+                    >
+                      {isPlaying ? (
+                        <Pause className="w-5 h-5 fill-white" />
+                      ) : (
+                        <Play className="w-5 h-5 fill-white ml-0.5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePlayNextVideo(true)}
+                      className="px-4 py-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <SkipForward className="w-4 h-4" />
+                      <span>Next Track</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Video Title & Actions */}

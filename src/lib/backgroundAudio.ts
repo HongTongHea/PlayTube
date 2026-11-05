@@ -1,31 +1,55 @@
 "use client";
 
 /**
- * Mobile Lock-Screen & Background Audio Keep-Alive Engine
+ * Mobile Lock-Screen & Background Audio Engine
  *
  * Ensures continuous music playback on mobile browsers (iOS Safari, Android Chrome, etc.)
  * when the phone screen is locked or the browser is minimized:
- * 1. Plays a tiny, non-zero (-80dB) looping PCM WAV in a native HTML5 <audio> element
- *    so iOS CoreAudio (AVAudioSession) and Android AudioFocus keep the tab's audio session
- *    and JavaScript event loop awake while the screen is locked.
- * 2. Maintains a Web Audio API AudioContext lock and Screen WakeLock where supported.
- * 3. Updates navigator.mediaSession metadata, playbackState, and positionState for
- *    OS lock-screen controls.
+ * 1. Primary Native HTML5 <audio> streaming (/api/audio?id=...) with gesture-unlocking
+ *    so iOS CoreAudio (AVAudioSession) and Android AudioFocus treat PlayTube as a native
+ *    background music player that continues playing when the screen is locked.
+ * 2. Fallback ultra-low-amplitude (-80dB) PCM WAV keep-alive loop when playing via IFrame.
+ * 3. Full navigator.mediaSession metadata, playbackState, positionState, and hardware
+ *    lock-screen transport controls (Play, Pause, Prev, Next, Seek, -10s/+10s).
  */
 
 let keepAliveAudio: HTMLAudioElement | null = null;
 let audioCtx: AudioContext | null = null;
 let wakeLockSentinel: any = null;
 let keepAliveDataUrl: string | null = null;
-let visibilitySpoofInstalled = false;
 let lastBackgroundTriggerTime = 0;
+
+// Capture native document visibility getters before any script can override them
+const nativeHiddenDescriptor =
+  typeof Document !== "undefined"
+    ? Object.getOwnPropertyDescriptor(Document.prototype, "hidden") ||
+      Object.getOwnPropertyDescriptor(document, "hidden")
+    : undefined;
+
+const nativeVisibilityStateDescriptor =
+  typeof Document !== "undefined"
+    ? Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState") ||
+      Object.getOwnPropertyDescriptor(document, "visibilityState")
+    : undefined;
+
+export function isPageActuallyHidden(): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    if (nativeHiddenDescriptor?.get) {
+      return Boolean(nativeHiddenDescriptor.get.call(document));
+    }
+    if (nativeVisibilityStateDescriptor?.get) {
+      return nativeVisibilityStateDescriptor.get.call(document) === "hidden";
+    }
+  } catch {}
+  return document.hidden || document.visibilityState === "hidden";
+}
 
 /**
  * Generates a 2-second 8000Hz 16-bit mono WAV file with a tiny non-zero waveform (amplitude = 3/32767).
- * Using non-zero PCM samples prevents iOS/Android from classifying the audio stream as digital silence
- * while remaining completely inaudible (-80 dB) to the listener.
+ * Used only as a fallback keep-alive when native audio streaming is not active.
  */
-function getKeepAliveWavDataUrl(): string {
+export function getKeepAliveWavDataUrl(): string {
   if (keepAliveDataUrl) return keepAliveDataUrl;
 
   const sampleRate = 8000;
@@ -76,58 +100,112 @@ function getKeepAliveWavDataUrl(): string {
 }
 
 /**
- * Installs Page Visibility overrides & tracks screen-lock / blur timestamps
- * so embedded players do not pause when locking the mobile screen.
+ * Unlocks an HTMLAudioElement on the first user gesture (touchstart / click)
+ * so iOS Safari and Android Chrome allow it to start playing even when the screen locks.
  */
-export function installMobileBackgroundSupport(onScreenLockOrHide?: () => void) {
-  if (typeof window === "undefined") return () => {};
+const unlockedAudioElements = new WeakSet<HTMLAudioElement>();
 
-  if (!visibilitySpoofInstalled) {
-    visibilitySpoofInstalled = true;
+export function unlockAudioElementOnGesture(audioEl: HTMLAudioElement | null): () => void {
+  if (typeof window === "undefined" || !audioEl) return () => {};
+
+  const unlock = () => {
+    if (unlockedAudioElements.has(audioEl)) return;
+    unlockedAudioElements.add(audioEl);
+
     try {
-      Object.defineProperty(document, "hidden", {
-        configurable: true,
-        get: () => false,
-      });
-      Object.defineProperty(document, "visibilityState", {
-        configurable: true,
-        get: () => "visible",
-      });
-      Object.defineProperty(document, "webkitHidden", {
-        configurable: true,
-        get: () => false,
-      });
-    } catch {
-      // Ignore if browser disallows property redefinition
-    }
-  }
+      const AudioContextClass =
+        window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        if (!audioCtx) audioCtx = new AudioContextClass();
+        if (audioCtx.state === "suspended") {
+          audioCtx.resume().catch(() => {});
+        }
+      }
+    } catch {}
 
-  const handleVisibilityOrBlur = () => {
-    lastBackgroundTriggerTime = Date.now();
-    if (onScreenLockOrHide) {
-      onScreenLockOrHide();
+    // Only prime if the element doesn't already have an active source playing
+    if (!audioEl.src || audioEl.src === "") {
+      try {
+        audioEl.src = getKeepAliveWavDataUrl();
+        audioEl.muted = true;
+        const p = audioEl.play();
+        if (p && typeof p.then === "function") {
+          p.then(() => {
+            audioEl.pause();
+            audioEl.muted = false;
+            audioEl.removeAttribute("src");
+          }).catch(() => {
+            audioEl.muted = false;
+          });
+        }
+      } catch {}
     }
   };
 
-  window.addEventListener("blur", handleVisibilityOrBlur, { passive: true });
-  window.addEventListener("pagehide", handleVisibilityOrBlur, { passive: true });
-  document.addEventListener("visibilitychange", handleVisibilityOrBlur, {
+  window.addEventListener("touchstart", unlock, { passive: true, once: true });
+  window.addEventListener("pointerdown", unlock, { passive: true, once: true });
+  window.addEventListener("click", unlock, { passive: true, once: true });
+
+  return () => {
+    window.removeEventListener("touchstart", unlock);
+    window.removeEventListener("pointerdown", unlock);
+    window.removeEventListener("click", unlock);
+  };
+}
+
+/**
+ * Tracks mobile screen-lock / visibility transitions and invokes callbacks
+ * when the phone screen locks/hides or unlocks/shows.
+ */
+export function installMobileBackgroundSupport(
+  onScreenLockOrHide?: () => void,
+  onScreenUnlockOrShow?: () => void
+) {
+  if (typeof window === "undefined") return () => {};
+
+  const handleVisibilityChange = () => {
+    if (isPageActuallyHidden()) {
+      lastBackgroundTriggerTime = Date.now();
+      onScreenLockOrHide?.();
+    } else {
+      onScreenUnlockOrShow?.();
+    }
+  };
+
+  const handlePageHideOrBlur = () => {
+    lastBackgroundTriggerTime = Date.now();
+    onScreenLockOrHide?.();
+  };
+
+  const handlePageShowOrFocus = () => {
+    if (!isPageActuallyHidden()) {
+      onScreenUnlockOrShow?.();
+    }
+  };
+
+  window.addEventListener("blur", handlePageHideOrBlur, { passive: true });
+  window.addEventListener("pagehide", handlePageHideOrBlur, { passive: true });
+  window.addEventListener("pageshow", handlePageShowOrFocus, { passive: true });
+  window.addEventListener("focus", handlePageShowOrFocus, { passive: true });
+  document.addEventListener("visibilitychange", handleVisibilityChange, {
     passive: true,
   });
-  document.addEventListener("webkitvisibilitychange", handleVisibilityOrBlur, {
+  document.addEventListener("webkitvisibilitychange", handleVisibilityChange, {
     passive: true,
   });
 
   return () => {
-    window.removeEventListener("blur", handleVisibilityOrBlur);
-    window.removeEventListener("pagehide", handleVisibilityOrBlur);
-    document.removeEventListener("visibilitychange", handleVisibilityOrBlur);
-    document.removeEventListener("webkitvisibilitychange", handleVisibilityOrBlur);
+    window.removeEventListener("blur", handlePageHideOrBlur);
+    window.removeEventListener("pagehide", handlePageHideOrBlur);
+    window.removeEventListener("pageshow", handlePageShowOrFocus);
+    window.removeEventListener("focus", handlePageShowOrFocus);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    document.removeEventListener("webkitvisibilitychange", handleVisibilityChange);
   };
 }
 
-export function wasRecentlyBackgrounded(windowMs = 3500): boolean {
-  return Date.now() - lastBackgroundTriggerTime < windowMs;
+export function wasRecentlyBackgrounded(windowMs = 4500): boolean {
+  return isPageActuallyHidden() || Date.now() - lastBackgroundTriggerTime < windowMs;
 }
 
 export function markBackgroundTriggerNow(): void {
@@ -135,31 +213,34 @@ export function markBackgroundTriggerNow(): void {
 }
 
 /**
- * Starts or resumes the native HTML5 <audio> keep-alive loop & Web Audio context.
- * Call this whenever playback starts or resumes.
+ * Starts or resumes the fallback silent <audio> keep-alive loop & Web Audio context.
+ * Note: When a real native <audio> music stream is actively playing, call
+ * pauseDummyKeepAliveAudio() so the dummy loop does not steal OS MediaSession focus.
  */
-export function startBackgroundAudioKeepAlive(): void {
+export function startBackgroundAudioKeepAlive(useDummyAudio = false): void {
   if (typeof window === "undefined") return;
 
-  try {
-    if (!keepAliveAudio) {
-      keepAliveAudio = document.createElement("audio");
-      keepAliveAudio.src = getKeepAliveWavDataUrl();
-      keepAliveAudio.loop = true;
-      keepAliveAudio.volume = 0.01;
-      keepAliveAudio.setAttribute("playsinline", "true");
-      keepAliveAudio.setAttribute("webkit-playsinline", "true");
-      keepAliveAudio.preload = "auto";
-      keepAliveAudio.style.display = "none";
-      document.body.appendChild(keepAliveAudio);
-    }
+  if (useDummyAudio) {
+    try {
+      if (!keepAliveAudio) {
+        keepAliveAudio = document.createElement("audio");
+        keepAliveAudio.src = getKeepAliveWavDataUrl();
+        keepAliveAudio.loop = true;
+        keepAliveAudio.volume = 0.01;
+        keepAliveAudio.setAttribute("playsinline", "true");
+        keepAliveAudio.setAttribute("webkit-playsinline", "true");
+        keepAliveAudio.preload = "auto";
+        keepAliveAudio.style.display = "none";
+        document.body.appendChild(keepAliveAudio);
+      }
 
-    if (keepAliveAudio.paused) {
-      keepAliveAudio.play().catch(() => {
-        // Will succeed on next user interaction if blocked initially
-      });
-    }
-  } catch {}
+      if (keepAliveAudio.paused) {
+        keepAliveAudio.play().catch(() => {});
+      }
+    } catch {}
+  } else {
+    pauseDummyKeepAliveAudio();
+  }
 
   try {
     const AudioContextClass =
@@ -177,25 +258,27 @@ export function startBackgroundAudioKeepAlive(): void {
   requestWakeLock();
 }
 
-/**
- * Stops the background keep-alive audio when the user intentionally pauses or closes the player.
- */
-export function stopBackgroundAudioKeepAlive(): void {
-  if (typeof window === "undefined") return;
-
+export function pauseDummyKeepAliveAudio(): void {
   try {
     if (keepAliveAudio && !keepAliveAudio.paused) {
       keepAliveAudio.pause();
     }
   } catch {}
+}
 
+/**
+ * Stops the background keep-alive audio when the user intentionally pauses or closes the player.
+ */
+export function stopBackgroundAudioKeepAlive(): void {
+  if (typeof window === "undefined") return;
+  pauseDummyKeepAliveAudio();
   releaseWakeLock();
 }
 
 async function requestWakeLock(): Promise<void> {
   if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
   try {
-    if (!wakeLockSentinel) {
+    if (!wakeLockSentinel && !isPageActuallyHidden()) {
       wakeLockSentinel = await (navigator as any).wakeLock.request("screen");
       wakeLockSentinel?.addEventListener?.("release", () => {
         wakeLockSentinel = null;
@@ -225,6 +308,7 @@ export interface MediaSessionHandlers {
   onPrevious?: () => void;
   onNext?: () => void;
   onSeekTo?: (seconds: number) => void;
+  onSeekOffset?: (deltaSeconds: number) => void;
 }
 
 /**
@@ -246,7 +330,7 @@ export function updateLockScreenMediaSession(
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.channelTitle || "PlayTube Artist",
-      album: "PlayTube Stream",
+      album: "PlayTube Music Stream",
       artwork: [
         { src: thumb, sizes: "96x96", type: "image/jpeg" },
         { src: thumb, sizes: "128x128", type: "image/jpeg" },
@@ -274,6 +358,18 @@ export function updateLockScreenMediaSession(
           handlers.onSeekTo?.(details.seekTime);
         }
       });
+    }
+    if (handlers.onSeekOffset) {
+      try {
+        navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+          const offset = details.seekOffset || 10;
+          handlers.onSeekOffset?.(-offset);
+        });
+        navigator.mediaSession.setActionHandler("seekforward", (details) => {
+          const offset = details.seekOffset || 10;
+          handlers.onSeekOffset?.(offset);
+        });
+      } catch {}
     }
   } catch {}
 }
