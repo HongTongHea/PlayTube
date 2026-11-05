@@ -97,10 +97,19 @@ export default function Sidebar() {
             className="w-64 h-full bg-white dark:bg-[#0f0f0f] border-r border-zinc-200 dark:border-zinc-800 p-4 overflow-y-auto space-y-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
-              <span className="font-bold text-base text-zinc-900 dark:text-white">
-                Play<span className="text-red-500">Tube</span> Menu
-              </span>
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <img
+                  src="/vibeplay-logo.png"
+                  alt="VibePlay"
+                  className="h-7 w-auto object-contain dark:hidden"
+                />
+                <img
+                  src="/vibeplay-logo-dark.png"
+                  alt="VibePlay"
+                  className="hidden dark:block h-7 w-auto object-contain"
+                />
+              </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
                 className="p-1.5 rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"

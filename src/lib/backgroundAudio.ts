@@ -329,8 +329,8 @@ export function updateLockScreenMediaSession(
 
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
-      artist: track.channelTitle || "PlayTube Artist",
-      album: "PlayTube Music Stream",
+      artist: track.channelTitle || "VibePlay Artist",
+      album: "VibePlay Music Stream",
       artwork: [
         { src: thumb, sizes: "96x96", type: "image/jpeg" },
         { src: thumb, sizes: "128x128", type: "image/jpeg" },

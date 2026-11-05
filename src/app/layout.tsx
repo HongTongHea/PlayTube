@@ -7,7 +7,7 @@ import ApiKeyModal from "@/components/ApiKeyModal";
 import StreamPlayer from "@/components/StreamPlayer";
 
 export const metadata: Metadata = {
-  title: "PlayTube — Clean, Ad-Free Music & Video Streaming",
+  title: "VibePlay — Clean, Ad-Free Music & Video Streaming",
   description:
     "Minimalist, distraction-free, ad-free music and video streaming experience powered by Next.js and YouTube Data API v3.",
 };

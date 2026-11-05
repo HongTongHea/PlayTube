@@ -160,14 +160,19 @@ export default function Navbar() {
         <Link
           href="/"
           onClick={handleLogoClick}
-          className="hidden md:flex items-center gap-2 group focus:outline-none"
+          className="flex items-center gap-2 group focus:outline-none shrink-0"
+          aria-label="VibePlay Home"
         >
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-red-600 to-rose-600 flex items-center justify-center shadow-sm shadow-red-500/20 group-hover:scale-105 transition-transform">
-            <Play className="w-4 h-4 text-white fill-white ml-0.5" />
-          </div>
-          <span className="font-bold text-base sm:text-lg tracking-tight text-zinc-900 dark:text-white">
-            Play<span className="text-red-500">Tube</span>
-          </span>
+          <img
+            src="/vibeplay-logo.png"
+            alt="VibePlay"
+            className="h-7 sm:h-8 md:h-9 w-auto object-contain dark:hidden group-hover:scale-[1.03] transition-transform"
+          />
+          <img
+            src="/vibeplay-logo-dark.png"
+            alt="VibePlay"
+            className="hidden dark:block h-7 sm:h-8 md:h-9 w-auto object-contain group-hover:scale-[1.03] transition-transform"
+          />
         </Link>
       </div>
 
